@@ -9,6 +9,7 @@ CREATE TABLE users
     password_hash VARCHAR(255) NOT NULL,
     role          VARCHAR(20) NOT NULL COMMENT 'BOOKER | PROVIDER | ADMIN',
     created_at    DATETIME    NOT NULL DEFAULT NOW(),
+    deleted_at    DATETIME    NULL COMMENT 'NULL이면 활성. 값 있으면 탈퇴 처리된 계정',
     PRIMARY KEY (id),
     UNIQUE KEY uq_users_email (email)
 );
