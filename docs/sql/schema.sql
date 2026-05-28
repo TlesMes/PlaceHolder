@@ -4,12 +4,12 @@
 
 CREATE TABLE users
 (
-    id            BIGINT      NOT NULL AUTO_INCREMENT,
+    id            BIGINT       NOT NULL AUTO_INCREMENT,
     email         VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role          VARCHAR(20) NOT NULL COMMENT 'BOOKER | PROVIDER | ADMIN',
-    created_at    DATETIME    NOT NULL DEFAULT NOW(),
-    deleted_at    DATETIME    NULL COMMENT 'NULL이면 활성. 값 있으면 탈퇴 처리된 계정',
+    role          VARCHAR(20)  NOT NULL COMMENT 'BOOKER | PROVIDER | ADMIN',
+    created_at    DATETIME     NOT NULL DEFAULT NOW(),
+    deleted_at    DATETIME NULL COMMENT 'NULL이면 활성. 값 있으면 탈퇴 처리된 계정',
     PRIMARY KEY (id),
     UNIQUE KEY uq_users_email (email)
 );
@@ -27,9 +27,9 @@ CREATE TABLE booker_accounts
 
 CREATE TABLE provider_accounts
 (
-    id                  BIGINT NOT NULL AUTO_INCREMENT,
-    user_id             BIGINT NOT NULL,
-    settlement_balance  INT    NOT NULL DEFAULT 0,
+    id                 BIGINT NOT NULL AUTO_INCREMENT,
+    user_id            BIGINT NOT NULL,
+    settlement_balance INT    NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uq_provider_accounts_user_id (user_id),
     CONSTRAINT fk_provider_accounts_user FOREIGN KEY (user_id) REFERENCES users (id),
@@ -46,7 +46,7 @@ CREATE TABLE events
     created_at  DATETIME     NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id),
     CONSTRAINT fk_events_provider FOREIGN KEY (provider_id) REFERENCES users (id),
-    INDEX idx_events_provider_id (provider_id)
+    INDEX       idx_events_provider_id (provider_id)
 );
 
 CREATE TABLE seats
@@ -56,14 +56,14 @@ CREATE TABLE seats
     label      VARCHAR(50) NOT NULL,
     price      INT         NOT NULL,
     status     VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE' COMMENT 'AVAILABLE | HELD | CONFIRMED',
-    held_by    BIGINT      NULL,
-    held_until DATETIME    NULL,
+    held_by    BIGINT NULL,
+    held_until DATETIME NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_seats_event_label (event_id, label),
     CONSTRAINT fk_seats_event FOREIGN KEY (event_id) REFERENCES events (id),
     CONSTRAINT fk_seats_held_by FOREIGN KEY (held_by) REFERENCES users (id),
     CONSTRAINT chk_seats_price CHECK (price > 0),
-    INDEX idx_seats_status_held_until (status, held_until)
+    INDEX      idx_seats_status_held_until (status, held_until)
 );
 
 CREATE TABLE reservations
@@ -78,21 +78,21 @@ CREATE TABLE reservations
     CONSTRAINT fk_reservations_booker FOREIGN KEY (booker_id) REFERENCES users (id),
     CONSTRAINT fk_reservations_seat FOREIGN KEY (seat_id) REFERENCES seats (id),
     CONSTRAINT chk_reservations_paid_amount CHECK (paid_amount > 0),
-    INDEX idx_reservations_booker_id (booker_id)
+    INDEX        idx_reservations_booker_id (booker_id)
 );
 
 CREATE TABLE point_transactions
 (
-    id             BIGINT   NOT NULL AUTO_INCREMENT,
-    user_id        BIGINT   NOT NULL,
+    id             BIGINT      NOT NULL AUTO_INCREMENT,
+    user_id        BIGINT      NOT NULL,
     type           VARCHAR(20) NOT NULL COMMENT 'CHARGE | DEDUCT | SETTLE',
-    amount         INT      NOT NULL,
-    reservation_id BIGINT   NULL,
-    created_at     DATETIME NOT NULL DEFAULT NOW(),
+    amount         INT         NOT NULL,
+    reservation_id BIGINT NULL,
+    created_at     DATETIME    NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id),
     CONSTRAINT fk_pt_user FOREIGN KEY (user_id) REFERENCES users (id),
     CONSTRAINT fk_pt_reservation FOREIGN KEY (reservation_id) REFERENCES reservations (id),
     CONSTRAINT chk_pt_amount CHECK (amount > 0),
-    INDEX idx_pt_user_id (user_id),
-    INDEX idx_pt_reservation_id (reservation_id)
+    INDEX          idx_pt_user_id (user_id),
+    INDEX          idx_pt_reservation_id (reservation_id)
 );
