@@ -21,3 +21,7 @@ spring:
 
 server:
   port: 8080
+
+jwt:
+  secret: ${JWT_SECRET:placeholder-dev-secret-key-must-be-at-least-32-bytes!!}
+  expiration-ms: 86400000

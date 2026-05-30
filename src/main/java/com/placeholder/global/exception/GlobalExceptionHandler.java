@@ -1,7 +1,9 @@
 package com.placeholder.global.exception;
 
+import com.placeholder.global.exception.custom.DuplicateEmailException;
 import com.placeholder.global.exception.custom.DuplicateSeatLabelException;
 import com.placeholder.global.exception.custom.EventNotFoundException;
+import com.placeholder.global.exception.custom.InvalidCredentialsException;
 import com.placeholder.global.exception.custom.InvalidUserRoleException;
 import com.placeholder.global.exception.custom.UserNotFoundException;
 import lombok.extern.slf4j.Slf4j;
@@ -68,6 +70,26 @@ public class GlobalExceptionHandler {
                 .build();
 
         return ResponseEntity.badRequest().body(response);
+    }
+
+    @ExceptionHandler(DuplicateEmailException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateEmailException(DuplicateEmailException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("DUPLICATE_EMAIL")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(InvalidCredentialsException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("INVALID_CREDENTIALS")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
 
     /**

@@ -7,10 +7,12 @@ import com.placeholder.domain.event.dto.EventListResponse;
 import com.placeholder.domain.event.service.EventService;
 import com.placeholder.domain.seat.dto.SeatResponse;
 import com.placeholder.domain.seat.service.SeatService;
+import com.placeholder.global.security.CustomUserDetails;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -21,17 +23,12 @@ public class EventController {
     private final EventService eventService;
     private final SeatService seatService;
 
-    /**
-     * 이벤트 등록 (제공자)
-     * Phase B-4: 임시로 providerId를 요청 파라미터로 받음
-     * Phase B-2 이후: @AuthenticationPrincipal로 변경 예정
-     */
     @PostMapping
     public ResponseEntity<EventCreateResponse> createEvent(
-            @RequestParam Long providerId,
+            @AuthenticationPrincipal CustomUserDetails userDetails,
             @Valid @RequestBody EventCreateRequest request) {
 
-        EventCreateResponse response = eventService.createEvent(providerId, request);
+        EventCreateResponse response = eventService.createEvent(userDetails.getUserId(), request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
