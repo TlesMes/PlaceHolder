@@ -103,6 +103,70 @@ com.placeholder
 
 ---
 
+## 현재 진행 상황 (2026.05.30 기준)
+
+### 완료된 작업 ✅
+- **Phase A:** 설계 완료
+  - 7개 엔티티 구현 (User, BookerAccount, ProviderAccount, Event, Seat, Reservation, PointTransaction)
+  - ERD, 테이블 정의, 초기 ADR
+
+- **Phase B-1:** Repository 계층
+  - 7개 JpaRepository 인터페이스 구현
+  - 커스텀 쿼리 메서드 정의 (findByEventId, findByStatusAndHeldUntilBefore 등)
+
+- **Phase B-4:** 기본 CRUD API
+  - Exception 인프라 (GlobalExceptionHandler, ErrorResponse, 커스텀 예외 4개)
+  - DTO 레이어 (Event 4개, Seat 1개)
+  - Service 레이어 (EventService, SeatService)
+  - Controller 레이어 (EventController - 4개 엔드포인트)
+  - SecurityConfig (임시 - 모든 요청 허용)
+  - application.yml batch insert 설정
+  - **API 테스트 완료:** 이벤트 등록/조회 정상 동작
+
+### 현재 상태
+- **작업 브랜치:** main
+- **마지막 커밋:** `feat: Phase B-4 기본 CRUD API 구현` (20cedef)
+- **실행 가능 API:**
+  - POST /api/events?providerId=1 - 이벤트 등록
+  - GET /api/events - 이벤트 목록
+  - GET /api/events/{id} - 이벤트 상세
+  - GET /api/events/{id}/seats - 좌석 목록
+
+### 다음 작업 (우선순위 순)
+1. **Phase B-3:** 회원가입 트랜잭션
+   - User + BookerAccount/ProviderAccount 동시 생성
+   - SignupRequest/Response DTO
+   - 트랜잭션 경계 설정
+
+2. **Phase B-2:** JWT 인증
+   - 로그인 API (JWT 발급)
+   - JwtAuthenticationFilter
+   - SecurityConfig 교체 (providerId 파라미터 제거)
+   - 역할 기반 접근 제어
+
+3. **Phase C:** 동시성 제어 ⭐ (프로젝트 핵심)
+   - C-1: 좌석 홀드 (락 전략 결정)
+   - C-2: 예약 확정 (트랜잭션 원자성)
+   - C-3: 자동 만료 해제
+   - C-4: 동시성 정합성 테스트
+
+### 중요 메모
+- **인증:** 현재 임시로 providerId 파라미터 사용 → Phase B-2에서 JWT로 교체 예정
+- **테스트 데이터:** Provider User (ID=1, email: provider@test.com) 존재
+- **주의:** ddl-auto: create이므로 애플리케이션 재시작 시 Provider User 재생성 필요
+- **패키지 구조:**
+  ```
+  domain/
+  ├── event/ (entity, repository, dto, service, controller)
+  ├── seat/ (entity, repository, dto, service)
+  └── ...
+  global/
+  ├── exception/ (GlobalExceptionHandler, ErrorResponse, custom/)
+  └── config/ (SecurityConfig)
+  ```
+
+---
+
 ## 세션 시작 템플릿
 
 Claude Code 세션 시작 시 다음 정보를 전달:
