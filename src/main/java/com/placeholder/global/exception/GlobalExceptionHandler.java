@@ -4,6 +4,7 @@ import com.placeholder.global.exception.custom.DuplicateEmailException;
 import com.placeholder.global.exception.custom.DuplicateSeatLabelException;
 import com.placeholder.global.exception.custom.EventNotFoundException;
 import com.placeholder.global.exception.custom.InvalidCredentialsException;
+import com.placeholder.global.exception.custom.InvalidUserRoleException;
 import com.placeholder.global.exception.custom.UserNotFoundException;
 import org.springframework.security.access.AccessDeniedException;
 import lombok.extern.slf4j.Slf4j;
@@ -55,7 +56,7 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
-    @ExceptionHandler(DuplicateSeatLabelException.class)
+    @ExceptionHandler({DuplicateSeatLabelException.class, InvalidUserRoleException.class})
     public ResponseEntity<ErrorResponse> handleBusinessException(RuntimeException ex) {
         ErrorResponse response = ErrorResponse.builder()
                 .code("BUSINESS_RULE_VIOLATION")

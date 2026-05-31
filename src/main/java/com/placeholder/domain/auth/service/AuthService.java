@@ -13,6 +13,7 @@ import com.placeholder.domain.user.entity.User.UserRole;
 import com.placeholder.domain.user.repository.UserRepository;
 import com.placeholder.global.exception.custom.DuplicateEmailException;
 import com.placeholder.global.exception.custom.InvalidCredentialsException;
+import com.placeholder.global.exception.custom.InvalidUserRoleException;
 import com.placeholder.global.jwt.JwtProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -37,6 +38,9 @@ public class AuthService {
         }
 
         UserRole role = UserRole.valueOf(request.getRole());
+        if (role != UserRole.BOOKER && role != UserRole.PROVIDER) {
+            throw new InvalidUserRoleException("지원하지 않는 역할입니다: " + role);
+        }
 
         User user = User.builder()
                 .email(request.getEmail())
