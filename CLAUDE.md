@@ -154,13 +154,14 @@ com.placeholder
    - C-2: 예약 확정 (트랜잭션 원자성)
    - C-3: 자동 만료 해제
    - C-4: 동시성 정합성 테스트
-   - **선행:** 테스트 DB 격리(아래 ⚠️) — 동시성 테스트는 실DB 락 동작 검증 필요
+   - **선행 완료 ✅:** 테스트 DB 격리(Testcontainers MySQL) — 동시성 테스트 기반 마련됨
 
 ### 중요 메모
 - **인증:** JWT 적용 완료. 컨트롤러는 @AuthenticationPrincipal로 userId 획득 (providerId 파라미터 제거됨)
 - **테스트 데이터:** Provider User (ID=1, email: provider@test.com) 존재
 - **주의:** ddl-auto: create이므로 애플리케이션 재시작 시 Provider User 재생성 필요
-- **⚠️ 테스트 DB 격리 필요:** 통합 테스트(@SpringBootTest, @DataJpaTest)가 별도 프로파일 없이 실 로컬 MySQL을 `ddl-auto:create`로 사용 → **테스트 실행 시 로컬 개발 DB 파괴**. Phase C 착수 전 `src/test/resources/application-test.yml` + Testcontainers MySQL로 격리 예정 (Phase C는 MySQL 락 동작 검증 필요로 H2 부적합)
+- **✅ 테스트 DB 격리 완료:** 통합 테스트를 Testcontainers MySQL로 격리. 베이스 클래스 `support/MySQLIntegrationTest`(@Testcontainers + @ServiceConnection)를 extends, `@ActiveProfiles("test")` + `application-test.yml`(create-drop). 더 이상 로컬 DB를 건드리지 않음.
+  - **⚠️ Docker API 버전 함정:** Docker Engine 29.x(MinAPIVersion 1.40) ↔ docker-java 3.4.1이 초기 probe에 하드코딩 API **1.32**를 보내 **HTTP 400** → "Could not find a valid Docker environment"로 테스트 전멸. 해결: `pom.xml` surefire `<systemPropertyVariables><api.version>1.44</api.version></systemPropertyVariables>`. 키는 반드시 `api.version`(env var `DOCKER_API_VERSION` 아님). TCP 노출 불필요 — named pipe 기본값으로 동작. **새 환경에서 동일 증상 시 이 설정부터 확인.**
 - **패키지 구조:**
   ```
   domain/
