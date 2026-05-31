@@ -123,45 +123,57 @@ com.placeholder
   - application.yml batch insert 설정
   - **API 테스트 완료:** 이벤트 등록/조회 정상 동작
 
+- **Phase B-3:** 회원가입 트랜잭션
+  - User + BookerAccount/ProviderAccount 단일 트랜잭션 생성
+  - SignupRequest/Response DTO
+  - 역할 검증 fail-fast (지원하지 않는 역할 → InvalidUserRoleException)
+
+- **Phase B-2:** JWT 인증/인가
+  - 로그인 API (JWT 발급), JwtProvider/JwtAuthenticationFilter
+  - SecurityConfig 교체 (providerId 파라미터 제거 → SecurityContext)
+  - 역할 기반 접근 제어 (@PreAuthorize + @EnableMethodSecurity)
+
+- **보안/테스트 개선** (Phase B 후속)
+  - soft delete 쿼리 필터링 (findBy...AndDeletedAtIsNull) 적용
+  - 401/403 의미 분리 (JwtAuthenticationEntryPoint → 인증 실패 401, @PreAuthorize → 인가 실패 403)
+  - 인증 DTO @Builder 적용 (테스트 리플렉션 제거)
+  - 테스트: AuthServiceTest, SignupTransactionTest, AccessControlTest, UserRepositoryTest
+
 ### 현재 상태
 - **작업 브랜치:** main
-- **마지막 커밋:** `feat: Phase B-4 기본 CRUD API 구현` (20cedef)
+- **마지막 커밋:** `fix: soft delete 쿼리 필터링 적용 및 역할 기반 접근 제어 완성` (ed0c798)
+  - 이후 401/403 분리·@Builder·ADMIN 방어·테스트 추가 작업은 미커밋 상태
 - **실행 가능 API:**
-  - POST /api/events?providerId=1 - 이벤트 등록
-  - GET /api/events - 이벤트 목록
-  - GET /api/events/{id} - 이벤트 상세
-  - GET /api/events/{id}/seats - 좌석 목록
+  - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
+  - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
+  - GET /api/events - 이벤트 목록, GET /api/events/{id} - 상세, GET /api/events/{id}/seats - 좌석
 
 ### 다음 작업 (우선순위 순)
-1. **Phase B-3:** 회원가입 트랜잭션
-   - User + BookerAccount/ProviderAccount 동시 생성
-   - SignupRequest/Response DTO
-   - 트랜잭션 경계 설정
-
-2. **Phase B-2:** JWT 인증
-   - 로그인 API (JWT 발급)
-   - JwtAuthenticationFilter
-   - SecurityConfig 교체 (providerId 파라미터 제거)
-   - 역할 기반 접근 제어
-
-3. **Phase C:** 동시성 제어 ⭐ (프로젝트 핵심)
+1. **Phase C:** 동시성 제어 ⭐ (프로젝트 핵심)
    - C-1: 좌석 홀드 (락 전략 결정)
    - C-2: 예약 확정 (트랜잭션 원자성)
    - C-3: 자동 만료 해제
    - C-4: 동시성 정합성 테스트
+   - **선행:** 테스트 DB 격리(아래 ⚠️) — 동시성 테스트는 실DB 락 동작 검증 필요
 
 ### 중요 메모
-- **인증:** 현재 임시로 providerId 파라미터 사용 → Phase B-2에서 JWT로 교체 예정
+- **인증:** JWT 적용 완료. 컨트롤러는 @AuthenticationPrincipal로 userId 획득 (providerId 파라미터 제거됨)
 - **테스트 데이터:** Provider User (ID=1, email: provider@test.com) 존재
 - **주의:** ddl-auto: create이므로 애플리케이션 재시작 시 Provider User 재생성 필요
+- **⚠️ 테스트 DB 격리 필요:** 통합 테스트(@SpringBootTest, @DataJpaTest)가 별도 프로파일 없이 실 로컬 MySQL을 `ddl-auto:create`로 사용 → **테스트 실행 시 로컬 개발 DB 파괴**. Phase C 착수 전 `src/test/resources/application-test.yml` + Testcontainers MySQL로 격리 예정 (Phase C는 MySQL 락 동작 검증 필요로 H2 부적합)
 - **패키지 구조:**
   ```
   domain/
+  ├── auth/ (controller, service, dto - 회원가입/로그인)
+  ├── user/ (entity, repository)
+  ├── booker/, provider/ (entity, repository)
   ├── event/ (entity, repository, dto, service, controller)
   ├── seat/ (entity, repository, dto, service)
-  └── ...
+  ├── reservation/, point/ (entity, repository)
   global/
   ├── exception/ (GlobalExceptionHandler, ErrorResponse, custom/)
+  ├── jwt/ (JwtProvider, JwtAuthenticationFilter)
+  ├── security/ (CustomUserDetails(Service), JwtAuthenticationEntryPoint)
   └── config/ (SecurityConfig)
   ```
 
