@@ -1,6 +1,7 @@
 package com.placeholder.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.placeholder.support.MySQLIntegrationTest;
 import com.placeholder.domain.auth.dto.LoginRequest;
 import com.placeholder.domain.auth.dto.SignupRequest;
 import com.placeholder.domain.auth.service.AuthService;
@@ -25,9 +26,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("local")
+@ActiveProfiles("test")
 @Transactional
-class AccessControlTest {
+class AccessControlTest extends MySQLIntegrationTest {
 
     @Autowired MockMvc mockMvc;
     @Autowired AuthService authService;

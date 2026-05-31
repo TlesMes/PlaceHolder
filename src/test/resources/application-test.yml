@@ -1,0 +1,14 @@
+spring:
+  # datasource(url/username/password)는 MySQLIntegrationTest의 @ServiceConnection이
+  # Testcontainers 컨테이너 기준으로 런타임 주입한다. 여기서 지정하지 않는다.
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+
+jwt:
+  secret: test-secret-key-must-be-at-least-32-bytes-long!!
+  expiration-ms: 3600000
