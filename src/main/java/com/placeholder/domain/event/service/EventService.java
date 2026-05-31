@@ -11,9 +11,9 @@ import com.placeholder.domain.seat.service.SeatService;
 import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
 import com.placeholder.global.exception.custom.EventNotFoundException;
-import com.placeholder.global.exception.custom.InvalidUserRoleException;
 import com.placeholder.global.exception.custom.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,19 +28,11 @@ public class EventService {
     private final SeatService seatService;
     private final UserRepository userRepository;
 
-    /**
-     * 이벤트 등록 (제공자)
-     * Phase B-4: 임시로 providerId를 받음 (Phase B-2에서 SecurityContext로 변경 예정)
-     */
+    @PreAuthorize("hasRole('PROVIDER')")
     @Transactional
     public EventCreateResponse createEvent(Long providerId, EventCreateRequest request) {
-        // 1. Provider 조회 및 검증
-        User provider = userRepository.findById(providerId)
+        User provider = userRepository.findByIdAndDeletedAtIsNull(providerId)
                 .orElseThrow(() -> new UserNotFoundException("제공자를 찾을 수 없습니다"));
-
-        if (provider.getRole() != User.UserRole.PROVIDER) {
-            throw new InvalidUserRoleException("제공자 권한이 필요합니다");
-        }
 
         // 2. Event 엔티티 생성 및 저장
         Event event = Event.builder()
