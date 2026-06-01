@@ -36,3 +36,6 @@ build/
 ### environ ###
 .env
 application-local.yml
+
+### Claude Code (worktrees, local settings) ###
+.claude/

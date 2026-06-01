@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.05.30 기준)
+## 현재 진행 상황 (2026.06.01 기준)
 
 ### 완료된 작업 ✅
 - **Phase A:** 설계 완료
@@ -140,9 +140,9 @@ com.placeholder
   - 테스트: AuthServiceTest, SignupTransactionTest, AccessControlTest, UserRepositoryTest
 
 ### 현재 상태
-- **작업 브랜치:** main
-- **마지막 커밋:** `fix: soft delete 쿼리 필터링 적용 및 역할 기반 접근 제어 완성` (ed0c798)
-  - 이후 401/403 분리·@Builder·ADMIN 방어·테스트 추가 작업은 미커밋 상태
+- **작업 브랜치:** main (origin/main 동기화 완료)
+- **마지막 커밋:** `Merge: Testcontainers MySQL 통합 테스트 DB 격리` (1b2e482)
+  - Phase B 후속(401/403 분리·@Builder·테스트)과 테스트 DB 격리까지 모두 커밋·머지·푸시 완료
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
