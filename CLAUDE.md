@@ -157,6 +157,7 @@ com.placeholder
    - **선행 완료 ✅:** 테스트 DB 격리(Testcontainers MySQL) — 동시성 테스트 기반 마련됨
 
 ### 중요 메모
+- **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
 - **인증:** JWT 적용 완료. 컨트롤러는 @AuthenticationPrincipal로 userId 획득 (providerId 파라미터 제거됨)
 - **테스트 데이터:** Provider User (ID=1, email: provider@test.com) 존재
 - **주의:** ddl-auto: create이므로 애플리케이션 재시작 시 Provider User 재생성 필요
