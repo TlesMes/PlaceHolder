@@ -1,95 +1,149 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getEventDetail } from '../api/events';
-
-const SEAT_STATUS_STYLE = {
-  AVAILABLE: { background: '#d1fae5', color: '#065f46', label: '예약 가능' },
-  HELD:      { background: '#fef9c3', color: '#854d0e', label: '홀드 중' },
-  CONFIRMED: { background: '#fee2e2', color: '#991b1b', label: '확정' },
-};
+import { holdSeat } from '../api/seats';
+import { useSeatPolling } from '../hooks/useSeatPolling';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { toMessage } from '../lib/errors';
+import { effectiveStatus } from '../lib/seatStyle';
+import { formatDateTime, formatPrice } from '../lib/format';
+import Layout from '../components/Layout';
+import Spinner from '../components/Spinner';
+import SeatGrid from '../components/SeatGrid';
+import StatusLegend from '../components/StatusLegend';
 
 export default function EventDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { isBooker } = useAuth();
+  const toast = useToast();
+
   const [event, setEvent] = useState(null);
-  const [error, setError] = useState('');
+  const [eventError, setEventError] = useState('');
+  const { seats, loading: seatsLoading, refetch } = useSeatPolling(id);
+
+  const [selectedSeatId, setSelectedSeatId] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     getEventDetail(id)
       .then((res) => setEvent(res.data))
-      .catch(() => setError('이벤트 정보를 불러오지 못했습니다.'));
+      .catch((err) => setEventError(toMessage(err, '이벤트 정보를 불러오지 못했습니다.')));
   }, [id]);
 
+  const selectedSeat = seats.find((s) => s.seatId === selectedSeatId);
+
   const handleSeatClick = (seat) => {
-    if (seat.status !== 'AVAILABLE') return;
-    // Phase C 연결 포인트: 좌석 홀드 API 호출 예정
-    console.log('좌석 선택:', seat);
-    alert(`[Phase C 준비] 좌석 ${seat.label} 선택됨 (홀드 미구현)`);
+    // 만료된 HELD도 effectiveStatus가 AVAILABLE이면 선택 가능.
+    if (effectiveStatus(seat) === 'AVAILABLE') {
+      setSelectedSeatId((prev) => (prev === seat.seatId ? null : seat.seatId));
+    }
   };
 
-  if (error) return <div style={{ padding: '2rem', color: '#dc2626' }}>{error}</div>;
-  if (!event) return <div style={{ padding: '2rem', color: '#9ca3af' }}>불러오는 중...</div>;
+  // 홀드 성공 → 결제 페이지로 이동 (좌석/이벤트/heldUntil을 state로 전달).
+  const handleHold = async () => {
+    if (!selectedSeat) return;
+    setBusy(true);
+    try {
+      const res = await holdSeat(selectedSeat.seatId);
+      navigate(`/events/${id}/seats/${selectedSeat.seatId}/checkout`, {
+        state: { seat: selectedSeat, event, heldUntil: res.data.heldUntil },
+      });
+    } catch (err) {
+      toast.error(toMessage(err, '홀드에 실패했습니다.'));
+      setSelectedSeatId(null);
+      refetch();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (eventError) {
+    return (
+      <Layout>
+        <p className="rounded-xl bg-rose-50 px-5 py-4 text-sm text-rose-600">{eventError}</p>
+        <Link to="/" className="mt-4 inline-block text-sm text-indigo-600 hover:text-indigo-700">
+          ← 목록으로
+        </Link>
+      </Layout>
+    );
+  }
 
   return (
-    <div style={styles.page}>
-      <header style={styles.header}>
-        <Link to="/" style={styles.back}>← 목록으로</Link>
-      </header>
+    <Layout>
+      <Link
+        to="/"
+        className="mb-4 inline-flex items-center text-sm text-slate-500 hover:text-slate-700"
+      >
+        ← 목록으로
+      </Link>
 
-      <main style={styles.main}>
-        <h2 style={styles.title}>{event.title}</h2>
-        <div style={styles.meta}>
-          <span>📍 {event.venue}</span>
-          <span>🕐 {new Date(event.eventAt).toLocaleString('ko-KR')}</span>
-        </div>
+      {!event ? (
+        <Spinner className="py-20" />
+      ) : (
+        <>
+          <div className="mb-6">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">{event.title}</h1>
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-500">
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden>📍</span>
+                {event.venue}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden>🕐</span>
+                {formatDateTime(event.eventAt)}
+              </span>
+            </div>
+          </div>
 
-        <h3 style={styles.sectionTitle}>좌석 현황</h3>
-        <div style={styles.legend}>
-          {Object.entries(SEAT_STATUS_STYLE).map(([status, s]) => (
-            <span key={status} style={{ ...styles.legendItem, background: s.background, color: s.color }}>
-              {s.label}
-            </span>
-          ))}
-        </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-slate-900">좌석 선택</h2>
+              <StatusLegend />
+            </div>
 
-        <div style={styles.seatGrid}>
-          {event.seats?.map((seat) => {
-            const s = SEAT_STATUS_STYLE[seat.status] ?? SEAT_STATUS_STYLE.AVAILABLE;
-            return (
-              <div
-                key={seat.seatId}
-                style={{
-                  ...styles.seat,
-                  background: s.background,
-                  color: s.color,
-                  cursor: seat.status === 'AVAILABLE' ? 'pointer' : 'default',
-                  opacity: seat.status === 'CONFIRMED' ? 0.6 : 1,
-                }}
-                onClick={() => handleSeatClick(seat)}
-                title={`${seat.label} — ${seat.price.toLocaleString()}원`}
-              >
-                <div style={styles.seatLabel}>{seat.label}</div>
-                <div style={styles.seatPrice}>{seat.price.toLocaleString()}원</div>
-              </div>
-            );
-          })}
+            {!isBooker && (
+              <p className="mb-4 rounded-lg bg-slate-50 px-4 py-2.5 text-sm text-slate-500">
+                좌석 홀드·예약은 BOOKER 계정만 가능합니다. 좌석 현황은 실시간으로 갱신됩니다.
+              </p>
+            )}
+
+            {seatsLoading ? (
+              <Spinner className="py-16" />
+            ) : seats.length === 0 ? (
+              <div className="py-16 text-center text-sm text-slate-400">좌석이 없습니다.</div>
+            ) : (
+              <SeatGrid
+                seats={seats}
+                myHeldSeatId={null}
+                selectedSeatId={selectedSeatId}
+                disabled={!isBooker || busy}
+                onSeatClick={handleSeatClick}
+              />
+            )}
+          </div>
+        </>
+      )}
+
+      {/* 액션바: 좌석을 선택하면 홀드→결제 진행 버튼 노출 */}
+      {isBooker && selectedSeat && (
+        <div className="sticky bottom-4 mt-6">
+          <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-lg">
+            <div className="text-sm">
+              <span className="font-semibold text-slate-900">{selectedSeat.label}</span>
+              <span className="text-slate-500"> · {formatPrice(selectedSeat.price)} 선택됨</span>
+            </div>
+            <button
+              onClick={handleHold}
+              disabled={busy}
+              className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {busy ? '처리 중…' : '홀드하고 결제하기'}
+            </button>
+          </div>
         </div>
-      </main>
-    </div>
+      )}
+    </Layout>
   );
 }
-
-const styles = {
-  page: { minHeight: '100vh', background: '#f9fafb' },
-  header: { padding: '1rem 2rem', background: '#fff', borderBottom: '1px solid #e5e7eb' },
-  back: { color: '#2563eb', textDecoration: 'none', fontSize: '0.95rem' },
-  main: { maxWidth: '900px', margin: '2rem auto', padding: '0 1rem' },
-  title: { fontSize: '1.6rem', marginBottom: '0.5rem' },
-  meta: { display: 'flex', gap: '1.5rem', color: '#6b7280', fontSize: '0.95rem', marginBottom: '2rem' },
-  sectionTitle: { marginBottom: '0.75rem' },
-  legend: { display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' },
-  legendItem: { padding: '0.2rem 0.7rem', borderRadius: '12px', fontSize: '0.8rem', fontWeight: '500' },
-  seatGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '0.75rem' },
-  seat: { padding: '0.75rem', borderRadius: '6px', textAlign: 'center', userSelect: 'none' },
-  seatLabel: { fontWeight: '600', fontSize: '0.95rem' },
-  seatPrice: { fontSize: '0.78rem', marginTop: '0.2rem' },
-};

@@ -1,71 +1,79 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { getEvents } from '../api/events';
+import { useAuth } from '../context/AuthContext';
+import { toMessage } from '../lib/errors';
+import { formatDateTime } from '../lib/format';
+import Layout from '../components/Layout';
+import Spinner from '../components/Spinner';
 
 export default function EventListPage() {
-  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const isLoggedIn = !!localStorage.getItem('accessToken');
 
   useEffect(() => {
     getEvents()
       .then((res) => setEvents(res.data.events))
-      .catch(() => setError('이벤트 목록을 불러오지 못했습니다.'));
+      .catch((err) => setError(toMessage(err, '이벤트 목록을 불러오지 못했습니다.')))
+      .finally(() => setLoading(false));
   }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem('accessToken');
-    navigate('/login');
-  };
-
   return (
-    <div style={styles.page}>
-      <header style={styles.header}>
-        <h1 style={styles.logo}>PlaceHolder</h1>
-        <div style={styles.nav}>
-          {isLoggedIn ? (
-            <button style={styles.navBtn} onClick={handleLogout}>로그아웃</button>
-          ) : (
-            <>
-              <Link to="/login" style={styles.navLink}>로그인</Link>
-              <Link to="/signup" style={styles.navLink}>회원가입</Link>
-            </>
-          )}
+    <Layout>
+      {!isAuthenticated && (
+        <div className="mb-6 flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50 px-5 py-4">
+          <p className="text-sm text-indigo-900">
+            좌석을 예약하려면 로그인이 필요합니다.
+          </p>
+          <Link
+            to="/login"
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700"
+          >
+            로그인
+          </Link>
         </div>
-      </header>
+      )}
 
-      <main style={styles.main}>
-        <h2 style={styles.sectionTitle}>이벤트 목록</h2>
-        {error && <p style={styles.error}>{error}</p>}
-        {events.length === 0 && !error && <p style={styles.empty}>등록된 이벤트가 없습니다.</p>}
-        <div style={styles.grid}>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">이벤트</h1>
+        <p className="mt-1 text-sm text-slate-500">예약 가능한 이벤트를 둘러보세요.</p>
+      </div>
+
+      {loading ? (
+        <Spinner className="py-20" />
+      ) : error ? (
+        <p className="rounded-xl bg-rose-50 px-5 py-4 text-sm text-rose-600">{error}</p>
+      ) : events.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 py-20 text-center text-slate-400">
+          등록된 이벤트가 없습니다.
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {events.map((event) => (
-            <Link to={`/events/${event.eventId}`} key={event.eventId} style={styles.card}>
-              <div style={styles.cardTitle}>{event.title}</div>
-              <div style={styles.cardMeta}>{event.venue}</div>
-              <div style={styles.cardMeta}>{new Date(event.eventAt).toLocaleString('ko-KR')}</div>
+            <Link
+              key={event.eventId}
+              to={`/events/${event.eventId}`}
+              className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md"
+            >
+              <h2 className="text-base font-semibold text-slate-900 group-hover:text-indigo-600">
+                {event.title}
+              </h2>
+              <dl className="mt-3 space-y-1.5 text-sm text-slate-500">
+                <div className="flex items-center gap-2">
+                  <span aria-hidden>📍</span>
+                  <span>{event.venue}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span aria-hidden>🕐</span>
+                  <span>{formatDateTime(event.eventAt)}</span>
+                </div>
+              </dl>
             </Link>
           ))}
         </div>
-      </main>
-    </div>
+      )}
+    </Layout>
   );
 }
-
-const styles = {
-  page: { minHeight: '100vh', background: '#f9fafb' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', background: '#fff', borderBottom: '1px solid #e5e7eb' },
-  logo: { margin: 0, fontSize: '1.3rem', color: '#2563eb' },
-  nav: { display: 'flex', gap: '1rem', alignItems: 'center' },
-  navLink: { color: '#2563eb', textDecoration: 'none', fontSize: '0.9rem' },
-  navBtn: { background: 'none', border: '1px solid #ccc', borderRadius: '4px', padding: '0.3rem 0.8rem', cursor: 'pointer', fontSize: '0.9rem' },
-  main: { maxWidth: '900px', margin: '2rem auto', padding: '0 1rem' },
-  sectionTitle: { marginBottom: '1.5rem' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1rem' },
-  card: { display: 'block', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '1.2rem', textDecoration: 'none', color: 'inherit', transition: 'box-shadow 0.2s' },
-  cardTitle: { fontWeight: '600', fontSize: '1.05rem', marginBottom: '0.5rem' },
-  cardMeta: { fontSize: '0.85rem', color: '#6b7280', marginTop: '0.2rem' },
-  error: { color: '#dc2626' },
-  empty: { color: '#9ca3af' },
-};
