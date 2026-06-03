@@ -5,6 +5,8 @@ import com.placeholder.global.exception.custom.DuplicateSeatLabelException;
 import com.placeholder.global.exception.custom.EventNotFoundException;
 import com.placeholder.global.exception.custom.InvalidCredentialsException;
 import com.placeholder.global.exception.custom.InvalidUserRoleException;
+import com.placeholder.global.exception.custom.SeatNotAvailableException;
+import com.placeholder.global.exception.custom.SeatNotFoundException;
 import com.placeholder.global.exception.custom.UserNotFoundException;
 import org.springframework.security.access.AccessDeniedException;
 import lombok.extern.slf4j.Slf4j;
@@ -45,7 +47,7 @@ public class GlobalExceptionHandler {
     /**
      * 커스텀 예외 처리 - 리소스 없음
      */
-    @ExceptionHandler({EventNotFoundException.class, UserNotFoundException.class})
+    @ExceptionHandler({EventNotFoundException.class, UserNotFoundException.class, SeatNotFoundException.class})
     public ResponseEntity<ErrorResponse> handleNotFoundException(RuntimeException ex) {
         ErrorResponse response = ErrorResponse.builder()
                 .code("RESOURCE_NOT_FOUND")
@@ -81,6 +83,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleDuplicateEmailException(DuplicateEmailException ex) {
         ErrorResponse response = ErrorResponse.builder()
                 .code("DUPLICATE_EMAIL")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(SeatNotAvailableException.class)
+    public ResponseEntity<ErrorResponse> handleSeatNotAvailableException(SeatNotAvailableException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("SEAT_NOT_AVAILABLE")
                 .message(ex.getMessage())
                 .timestamp(LocalDateTime.now())
                 .build();
