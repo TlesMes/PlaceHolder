@@ -1,0 +1,7 @@
+package com.placeholder.global.exception.custom;
+
+public class SeatNotAvailableException extends RuntimeException {
+    public SeatNotAvailableException(String message) {
+        super(message);
+    }
+}

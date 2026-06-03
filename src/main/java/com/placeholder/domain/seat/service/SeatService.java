@@ -2,14 +2,22 @@ package com.placeholder.domain.seat.service;
 
 import com.placeholder.domain.event.dto.EventCreateRequest;
 import com.placeholder.domain.event.entity.Event;
+import com.placeholder.domain.seat.dto.SeatHoldResponse;
 import com.placeholder.domain.seat.dto.SeatResponse;
 import com.placeholder.domain.seat.entity.Seat;
 import com.placeholder.domain.seat.repository.SeatRepository;
+import com.placeholder.domain.user.entity.User;
+import com.placeholder.domain.user.repository.UserRepository;
 import com.placeholder.global.exception.custom.DuplicateSeatLabelException;
+import com.placeholder.global.exception.custom.SeatNotAvailableException;
+import com.placeholder.global.exception.custom.SeatNotFoundException;
+import com.placeholder.global.exception.custom.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -20,6 +28,10 @@ import java.util.Set;
 public class SeatService {
 
     private final SeatRepository seatRepository;
+    private final UserRepository userRepository;
+
+    @Value("${seat.hold.ttl-minutes:5}")
+    private int holdTtlMinutes;
 
     /**
      * 이벤트에 대한 좌석 일괄 생성
@@ -49,6 +61,34 @@ public class SeatService {
         // saveAll() - JPA batch insert 사용
         List<Seat> savedSeats = seatRepository.saveAll(seats);
         return savedSeats.size();
+    }
+
+    /**
+     * 좌석 홀드(점유). 비관적 락으로 좌석 행을 잠근 뒤 점유 가능 여부를 판정하고 전이한다.
+     * 동시 요청 시 락을 보유한 트랜잭션만 status를 검사·갱신하므로 한 명만 성공한다 (ADR-008).
+     */
+    @Transactional
+    public SeatHoldResponse holdSeat(Long seatId, Long bookerId) {
+        Seat seat = seatRepository.findByIdForUpdate(seatId)
+                .orElseThrow(() -> new SeatNotFoundException("좌석을 찾을 수 없습니다"));
+
+        LocalDateTime now = LocalDateTime.now();
+        if (!seat.isHoldable(now)) {
+            throw new SeatNotAvailableException("이미 점유된 좌석입니다");
+        }
+
+        User booker = userRepository.findByIdAndDeletedAtIsNull(bookerId)
+                .orElseThrow(() -> new UserNotFoundException("예약자를 찾을 수 없습니다"));
+
+        LocalDateTime heldUntil = now.plusMinutes(holdTtlMinutes);
+        seat.hold(booker, heldUntil);
+
+        return SeatHoldResponse.builder()
+                .seatId(seat.getId())
+                .status(seat.getStatus().name())
+                .heldBy(booker.getId())
+                .heldUntil(seat.getHeldUntil())
+                .build();
     }
 
     /**
