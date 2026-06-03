@@ -70,6 +70,12 @@ public class Seat {
         this.heldUntil = heldUntil;
     }
 
+    public void confirm() {
+        this.status = SeatStatus.CONFIRMED;
+        this.heldBy = null;
+        this.heldUntil = null;
+    }
+
     public enum SeatStatus {
         AVAILABLE, HELD, CONFIRMED
     }

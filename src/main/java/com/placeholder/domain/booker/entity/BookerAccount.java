@@ -1,5 +1,6 @@
 package com.placeholder.domain.booker.entity;
 
+import com.placeholder.global.exception.custom.InsufficientPointException;
 import com.placeholder.domain.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
@@ -23,4 +24,11 @@ public class BookerAccount {
     @Builder.Default
     @Column(nullable = false)
     private int balance = 0;
+
+    public void deduct(int amount) {
+        if (this.balance < amount) {
+            throw new InsufficientPointException("포인트 잔액이 부족합니다");
+        }
+        this.balance -= amount;
+    }
 }
