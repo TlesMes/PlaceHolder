@@ -139,21 +139,41 @@ com.placeholder
   - 인증 DTO @Builder 적용 (테스트 리플렉션 제거)
   - 테스트: AuthServiceTest, SignupTransactionTest, AccessControlTest, UserRepositoryTest
 
+- **Phase C-1:** 좌석 홀드 (비관적 락) — PR #1
+  - SELECT ... FOR UPDATE(findByIdForUpdate)로 좌석 행 잠금 → 동시 요청 시 한 명만 성공
+  - status AVAILABLE → HELD, held_by/held_until(TTL 5분) 설정
+  - lazy 만료 정책(ADR-008): held_until 경과한 HELD는 재점유 가능
+  - POST /api/seats/{seatId}/hold (BOOKER), 동시성 테스트 포함
+
+- **Phase C-2:** 예약 확정 (트랜잭션 원자성) — PR #2
+  - 좌석·BookerAccount 비관적 락 → [포인트 차감 + 제공자 정산 적립 + 좌석 CONFIRMED + Reservation + PointTransaction 2건] 단일 트랜잭션
+  - 잔액 부족 시 InsufficientPointException으로 전체 롤백
+  - POST /api/seats/{seatId}/confirm (BOOKER)
+
+- **Phase F-2:** BOOKER 좌석 예약 프론트엔드 — PR #3
+  - React + Vite + TailwindCSS. 동시성(홀드/확정)을 시각적으로 검증하는 용도
+  - 좌석 그리드(AVAILABLE/HELD/CONFIRMED 3색), useSeatPolling 2.5초 폴링 실시간 갱신
+  - 홀드 → 결제 페이지(URL 이동) → 결제수단·예약자정보 입력 → 확정 흐름
+  - 만료된 HELD를 AVAILABLE로 취급(effectiveStatus, 서버 lazy 만료와 일치)
+  - 백엔드: SeatResponse.SeatInfo에 heldUntil 추가 (프론트 만료 시각 인식용)
+
 ### 현재 상태
 - **작업 브랜치:** main (origin/main 동기화 완료)
-- **마지막 커밋:** `Merge: Testcontainers MySQL 통합 테스트 DB 격리` (1b2e482)
-  - Phase B 후속(401/403 분리·@Builder·테스트)과 테스트 DB 격리까지 모두 커밋·머지·푸시 완료
+- **마지막 커밋:** `Merge pull request #3 ... feature/frontend-booker-ui` (5dc8cec)
+  - Phase C-1(홀드)·C-2(확정)·F-2(프론트엔드)까지 모두 커밋·머지·푸시 완료
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
-  - GET /api/events - 이벤트 목록, GET /api/events/{id} - 상세, GET /api/events/{id}/seats - 좌석
+  - GET /api/events - 이벤트 목록, GET /api/events/{id} - 상세, GET /api/events/{id}/seats - 좌석(heldUntil 포함)
+  - POST /api/seats/{seatId}/hold - 좌석 홀드 (BOOKER)
+  - POST /api/seats/{seatId}/confirm - 예약 확정 (BOOKER)
+- **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **Phase C:** 동시성 제어 ⭐ (프로젝트 핵심)
-   - C-1: 좌석 홀드 (락 전략 결정)
-   - C-2: 예약 확정 (트랜잭션 원자성)
-   - C-3: 자동 만료 해제
-   - C-4: 동시성 정합성 테스트
+1. **Phase C 잔여:** 동시성 제어 ⭐ (프로젝트 핵심)
+   - **C-1 완료 ✅** (홀드, PR #1) / **C-2 완료 ✅** (확정, PR #2)
+   - C-3: 자동 만료 해제 (스케줄러 폴링 vs lazy — ADR 후보). 현재는 lazy 만료만 동작, 미점유 시 status가 HELD로 박제됨
+   - C-4: 동시성 정합성 테스트 (CountDownLatch/ExecutorService로 동시 N건 증명)
    - **선행 완료 ✅:** 테스트 DB 격리(Testcontainers MySQL) — 동시성 테스트 기반 마련됨
 
 ### 중요 메모
@@ -170,14 +190,16 @@ com.placeholder
   ├── user/ (entity, repository)
   ├── booker/, provider/ (entity, repository)
   ├── event/ (entity, repository, dto, service, controller)
-  ├── seat/ (entity, repository, dto, service)
-  ├── reservation/, point/ (entity, repository)
+  ├── seat/ (entity, repository, dto, service, controller - 홀드)
+  ├── reservation/ (entity, repository, dto, service, controller - 확정)
+  ├── point/ (entity, repository)
   global/
   ├── exception/ (GlobalExceptionHandler, ErrorResponse, custom/)
   ├── jwt/ (JwtProvider, JwtAuthenticationFilter)
   ├── security/ (CustomUserDetails(Service), JwtAuthenticationEntryPoint)
-  └── config/ (SecurityConfig)
+  └── config/ (SecurityConfig, WebConfig - CORS)
   ```
+- **프론트엔드 구조:** `frontend/src/` — pages(Login/Signup/EventList/EventDetail/Checkout), components(SeatGrid/SeatCell/Header/Layout 등), context(Auth/Toast), hooks(useSeatPolling), lib(jwt/errors/format/seatStyle), api(client/auth/events/seats). 폴링은 useSeatPolling 훅 경계로 분리(추후 SSE 교체점).
 
 ---
 
