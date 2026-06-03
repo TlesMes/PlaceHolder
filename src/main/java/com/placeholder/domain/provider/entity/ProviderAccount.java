@@ -23,4 +23,8 @@ public class ProviderAccount {
     @Builder.Default
     @Column(name = "settlement_balance", nullable = false)
     private int settlementBalance = 0;
+
+    public void settle(int amount) {
+        this.settlementBalance += amount;
+    }
 }

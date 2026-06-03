@@ -3,10 +3,13 @@ package com.placeholder.global.exception;
 import com.placeholder.global.exception.custom.DuplicateEmailException;
 import com.placeholder.global.exception.custom.DuplicateSeatLabelException;
 import com.placeholder.global.exception.custom.EventNotFoundException;
+import com.placeholder.global.exception.custom.InsufficientPointException;
 import com.placeholder.global.exception.custom.InvalidCredentialsException;
 import com.placeholder.global.exception.custom.InvalidUserRoleException;
+import com.placeholder.global.exception.custom.ReservationNotFoundException;
 import com.placeholder.global.exception.custom.SeatNotAvailableException;
 import com.placeholder.global.exception.custom.SeatNotFoundException;
+import com.placeholder.global.exception.custom.SeatNotHeldByUserException;
 import com.placeholder.global.exception.custom.UserNotFoundException;
 import org.springframework.security.access.AccessDeniedException;
 import lombok.extern.slf4j.Slf4j;
@@ -97,6 +100,36 @@ public class GlobalExceptionHandler {
                 .timestamp(LocalDateTime.now())
                 .build();
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(SeatNotHeldByUserException.class)
+    public ResponseEntity<ErrorResponse> handleSeatNotHeldByUserException(SeatNotHeldByUserException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("SEAT_NOT_HELD_BY_USER")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+    }
+
+    @ExceptionHandler(InsufficientPointException.class)
+    public ResponseEntity<ErrorResponse> handleInsufficientPointException(InsufficientPointException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("INSUFFICIENT_POINT")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    @ExceptionHandler(ReservationNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleReservationNotFoundException(ReservationNotFoundException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("RESOURCE_NOT_FOUND")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
