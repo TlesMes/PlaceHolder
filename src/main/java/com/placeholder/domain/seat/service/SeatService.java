@@ -110,6 +110,7 @@ public class SeatService {
                         .label(seat.getLabel())
                         .price(seat.getPrice())
                         .status(seat.getStatus().name())
+                        .heldUntil(seat.getHeldUntil())
                         .build())
                 .toList();
 

@@ -1,72 +1,103 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { signup } from '../api/auth';
+import { useToast } from '../context/ToastContext';
+import { toMessage } from '../lib/errors';
+import AuthCard, { Field, SubmitButton } from '../components/AuthCard';
+
+const ROLES = [
+  { value: 'BOOKER', label: '예약자', desc: '좌석을 예약합니다' },
+  { value: 'PROVIDER', label: '제공자', desc: '좌석을 등록합니다' },
+];
 
 export default function SignupPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [form, setForm] = useState({ email: '', password: '', role: 'BOOKER' });
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSubmitting(true);
     try {
       await signup(form);
+      toast.success('회원가입이 완료되었습니다. 로그인하세요.');
       navigate('/login');
     } catch (err) {
-      setError(err.response?.data?.message ?? '회원가입 실패');
+      setError(toMessage(err, '회원가입에 실패했습니다.'));
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>회원가입</h2>
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <label style={styles.label}>이메일</label>
-          <input
-            style={styles.input}
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            required
-          />
-          <label style={styles.label}>비밀번호</label>
-          <input
-            style={styles.input}
-            type="password"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            required
-          />
-          <label style={styles.label}>역할</label>
-          <select
-            style={styles.input}
-            value={form.role}
-            onChange={(e) => setForm({ ...form, role: e.target.value })}
-          >
-            <option value="BOOKER">BOOKER (예약자)</option>
-            <option value="PROVIDER">PROVIDER (좌석 제공자)</option>
-          </select>
-          {error && <p style={styles.error}>{error}</p>}
-          <button style={styles.button} type="submit">가입하기</button>
-        </form>
-        <p style={styles.link}>
-          이미 계정이 있나요? <Link to="/login">로그인</Link>
-        </p>
-      </div>
-    </div>
+    <AuthCard
+      title="회원가입"
+      subtitle="PlaceHolder 계정을 만드세요."
+      footer={
+        <>
+          이미 계정이 있나요?{' '}
+          <Link to="/login" className="font-medium text-indigo-600 hover:text-indigo-700">
+            로그인
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field
+          label="이메일"
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+          placeholder="you@example.com"
+          required
+        />
+        <Field
+          label="비밀번호"
+          type="password"
+          value={form.password}
+          onChange={(e) => setForm({ ...form, password: e.target.value })}
+          placeholder="••••••••"
+          required
+        />
+
+        <div>
+          <span className="mb-1.5 block text-sm font-medium text-slate-700">역할</span>
+          <div className="grid grid-cols-2 gap-2">
+            {ROLES.map((r) => {
+              const active = form.role === r.value;
+              return (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setForm({ ...form, role: r.value })}
+                  className={`rounded-lg border px-3 py-2.5 text-left transition ${
+                    active
+                      ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-200'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <span
+                    className={`block text-sm font-semibold ${
+                      active ? 'text-indigo-700' : 'text-slate-700'
+                    }`}
+                  >
+                    {r.label}
+                  </span>
+                  <span className="block text-xs text-slate-500">{r.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {error && (
+          <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p>
+        )}
+        <SubmitButton disabled={submitting}>{submitting ? '가입 중…' : '가입하기'}</SubmitButton>
+      </form>
+    </AuthCard>
   );
 }
-
-const styles = {
-  container: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: '#f5f5f5' },
-  card: { background: '#fff', padding: '2rem', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', width: '360px' },
-  title: { marginBottom: '1.5rem', textAlign: 'center' },
-  form: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
-  label: { fontSize: '0.85rem', color: '#555' },
-  input: { padding: '0.5rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem' },
-  button: { marginTop: '1rem', padding: '0.7rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem' },
-  error: { color: '#dc2626', fontSize: '0.85rem' },
-  link: { marginTop: '1rem', textAlign: 'center', fontSize: '0.9rem' },
-};
