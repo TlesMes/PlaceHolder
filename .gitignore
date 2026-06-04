@@ -39,3 +39,6 @@ application-local.yml
 
 ### Claude Code (worktrees, local settings) ###
 .claude/
+
+### 임시 학습/작업 노트 (리포에 커밋하지 않음) ###
+docs/_temp/

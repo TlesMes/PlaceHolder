@@ -25,6 +25,8 @@ server:
 seat:
   hold:
     ttl-minutes: 5   # 좌석 홀드 유지 시간(분). 서버가 held_until = now + TTL로 설정
+  expiry:
+    scan-interval-ms: 60000   # 만료된 HELD 좌석 스캔 주기(ms). 스케줄러가 AVAILABLE로 해제
 
 jwt:
   secret: ${JWT_SECRET:placeholder-dev-secret-key-must-be-at-least-32-bytes!!}

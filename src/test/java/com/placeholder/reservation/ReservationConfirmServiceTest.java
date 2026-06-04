@@ -27,7 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -202,9 +201,7 @@ class ReservationConfirmServiceTest extends MySQLIntegrationTest {
                 .build());
     }
 
-    private static final AtomicInteger SEQ = new AtomicInteger();
-
     private static int uniq() {
-        return SEQ.incrementAndGet();
+        return uniqueId();
     }
 }
