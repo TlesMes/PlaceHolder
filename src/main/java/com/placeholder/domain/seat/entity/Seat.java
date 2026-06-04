@@ -76,6 +76,16 @@ public class Seat {
         this.heldUntil = null;
     }
 
+    /**
+     * 만료된 HELD 좌석을 AVAILABLE로 되돌린다. (스케줄러 자동 만료, ADR-009)
+     * 상태 변경은 이 도메인 메서드로만 수행한다 (setter 금지).
+     */
+    public void release() {
+        this.status = SeatStatus.AVAILABLE;
+        this.heldBy = null;
+        this.heldUntil = null;
+    }
+
     public enum SeatStatus {
         AVAILABLE, HELD, CONFIRMED
     }

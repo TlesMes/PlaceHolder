@@ -30,5 +30,14 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     List<Seat> findByStatusAndHeldUntilBefore(SeatStatus status, LocalDateTime dateTime);
 
+    /**
+     * 만료된 HELD 좌석의 ID만 가볍게 조회한다 (락 없음).
+     * 스케줄러가 후보 ID를 모은 뒤 각 행을 findByIdForUpdate로 개별 재잠금한다 (ADR-009).
+     * 인덱스 idx_seats_status_held_until 활용.
+     */
+    @Query("select s.id from Seat s where s.status = :status and s.heldUntil < :now")
+    List<Long> findExpiredHeldSeatIds(@Param("status") SeatStatus status,
+                                      @Param("now") LocalDateTime now);
+
     List<Seat> findByHeldByIdAndStatus(Long userId, SeatStatus status);
 }
