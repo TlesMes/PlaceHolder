@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.01 기준)
+## 현재 진행 상황 (2026.06.04 기준)
 
 ### 완료된 작업 ✅
 - **Phase A:** 설계 완료
@@ -157,10 +157,22 @@ com.placeholder
   - 만료된 HELD를 AVAILABLE로 취급(effectiveStatus, 서버 lazy 만료와 일치)
   - 백엔드: SeatResponse.SeatInfo에 heldUntil 추가 (프론트 만료 시각 인식용)
 
+- **Phase C-3:** 좌석 홀드 자동 만료 해제 (스케줄러 폴링) — PR #4
+  - SeatExpiryScheduler(@Scheduled, fixedDelay)가 SeatExpiryService(@Transactional)에 위임 (self-invocation 함정 회피)
+  - 후보 ID를 락 없이 조회(findExpiredHeldSeatIds, ID projection) → 행별 findByIdForUpdate로 개별 재잠금 → 락 보유 상태에서 만료 재확인 → Seat.release()로 AVAILABLE 전이 (TOCTOU 방어)
+  - 기존 lazy 만료(isHoldable)는 스캔 주기 빈틈 보정 안전망으로 유지
+  - 만료 해제 전략 결정: ADR-009 (스케줄러 폴링 + lazy 안전망 병행). 폴링 부하/배치 분할은 Phase D 측정 후 조정
+  - scan-interval-ms 기본 60초(application.yml), 테스트는 사실상 비활성 후 직접 호출
+
+- **Phase C-4:** 동시성 정합성 테스트 — PR #4
+  - SeatExpiryConcurrencyTest: 만료 vs confirm/hold 동시 경쟁 5개 시나리오 (CountDownLatch/ExecutorService)
+  - "차감됐는데 AVAILABLE"·중복 점유 같은 정합성 위반이 없음을 증명
+  - 부수: 통합 테스트 이메일 충돌 격리 결함 수정(uniqueId() JVM 단일 시퀀스로 통일), ADR 경로 docs/adr 소문자 통일
+
 ### 현재 상태
 - **작업 브랜치:** main (origin/main 동기화 완료)
-- **마지막 커밋:** `Merge pull request #3 ... feature/frontend-booker-ui` (5dc8cec)
-  - Phase C-1(홀드)·C-2(확정)·F-2(프론트엔드)까지 모두 커밋·머지·푸시 완료
+- **마지막 커밋:** `Merge pull request #4 ... feature/seat-expiry-scheduler` (a972f62)
+  - Phase C-1·C-2·C-3·C-4 + F-2까지 모두 커밋·머지·푸시 완료
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -170,11 +182,12 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **Phase C 잔여:** 동시성 제어 ⭐ (프로젝트 핵심)
-   - **C-1 완료 ✅** (홀드, PR #1) / **C-2 완료 ✅** (확정, PR #2)
-   - C-3: 자동 만료 해제 (스케줄러 폴링 vs lazy — ADR 후보). 현재는 lazy 만료만 동작, 미점유 시 status가 HELD로 박제됨
-   - C-4: 동시성 정합성 테스트 (CountDownLatch/ExecutorService로 동시 N건 증명)
-   - **선행 완료 ✅:** 테스트 DB 격리(Testcontainers MySQL) — 동시성 테스트 기반 마련됨
+1. **Phase C 완료 ✅:** 동시성 제어 ⭐ (프로젝트 핵심)
+   - C-1 ✅ (홀드, PR #1) / C-2 ✅ (확정, PR #2) / C-3 ✅ (자동 만료, PR #4) / C-4 ✅ (정합성 테스트, PR #4)
+   - PR #4 머지 후 main 동기화 필요
+2. **Phase D:** 부하 측정 ⭐ (k6/nGrinder)
+   - 동시성 시나리오 부하 측정 → 적정 scan-interval-ms, 대량 만료 시 배치 분할 필요성 판단 (ADR-009 후속)
+   - 측정 수치 해석·판단은 인간 몫
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
