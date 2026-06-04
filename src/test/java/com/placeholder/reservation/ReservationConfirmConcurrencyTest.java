@@ -175,9 +175,7 @@ class ReservationConfirmConcurrencyTest extends MySQLIntegrationTest {
                 .build());
     }
 
-    private static final AtomicInteger SEQ = new AtomicInteger(1000);
-
     private static int uniq() {
-        return SEQ.incrementAndGet();
+        return uniqueId();
     }
 }

@@ -184,9 +184,7 @@ class SeatHoldConcurrencyTest extends MySQLIntegrationTest {
         return ids;
     }
 
-    private static final AtomicInteger SEQ = new AtomicInteger();
-
     private static int uniq() {
-        return SEQ.incrementAndGet();
+        return uniqueId();
     }
 }
