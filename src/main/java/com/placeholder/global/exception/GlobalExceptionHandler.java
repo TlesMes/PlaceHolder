@@ -1,5 +1,8 @@
 package com.placeholder.global.exception;
 
+import com.placeholder.global.exception.custom.CouponAlreadyRedeemedByUserException;
+import com.placeholder.global.exception.custom.CouponExhaustedException;
+import com.placeholder.global.exception.custom.CouponNotFoundException;
 import com.placeholder.global.exception.custom.DuplicateEmailException;
 import com.placeholder.global.exception.custom.DuplicateSeatLabelException;
 import com.placeholder.global.exception.custom.EventNotFoundException;
@@ -50,7 +53,8 @@ public class GlobalExceptionHandler {
     /**
      * 커스텀 예외 처리 - 리소스 없음
      */
-    @ExceptionHandler({EventNotFoundException.class, UserNotFoundException.class, SeatNotFoundException.class})
+    @ExceptionHandler({EventNotFoundException.class, UserNotFoundException.class, SeatNotFoundException.class,
+            CouponNotFoundException.class})
     public ResponseEntity<ErrorResponse> handleNotFoundException(RuntimeException ex) {
         ErrorResponse response = ErrorResponse.builder()
                 .code("RESOURCE_NOT_FOUND")
@@ -110,6 +114,18 @@ public class GlobalExceptionHandler {
                 .timestamp(LocalDateTime.now())
                 .build();
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+    }
+
+    @ExceptionHandler({CouponAlreadyRedeemedByUserException.class, CouponExhaustedException.class})
+    public ResponseEntity<ErrorResponse> handleCouponRedeemConflict(RuntimeException ex) {
+        String code = (ex instanceof CouponExhaustedException)
+                ? "COUPON_EXHAUSTED" : "COUPON_ALREADY_REDEEMED";
+        ErrorResponse response = ErrorResponse.builder()
+                .code(code)
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
     @ExceptionHandler(InsufficientPointException.class)
