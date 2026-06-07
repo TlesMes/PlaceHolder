@@ -7,7 +7,7 @@ import com.placeholder.domain.event.dto.EventListResponse;
 import com.placeholder.domain.event.entity.Event;
 import com.placeholder.domain.event.repository.EventRepository;
 import com.placeholder.domain.seat.entity.Seat;
-import com.placeholder.domain.seat.entity.Seat.SeatStatus;
+import com.placeholder.domain.seat.repository.SeatCountProjection;
 import com.placeholder.domain.seat.repository.SeatRepository;
 import com.placeholder.domain.seat.service.SeatService;
 import com.placeholder.domain.user.entity.User;
@@ -20,6 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -64,14 +66,19 @@ public class EventService {
     public EventListResponse getEvents() {
         List<Event> events = eventRepository.findAll();
 
-        // [Phase D-1 before] 순진한 구현: 이벤트마다 좌석 카운트를 개별 질의 → N+1 발생.
-        // 이벤트 N개 = events 1쿼리 + count 2쿼리 × N = 1 + 2N 쿼리.
-        // Step 5에서 GROUP BY 집계 1쿼리로 교체 예정.
+        // [Phase D-1 after] GROUP BY 집계 1쿼리로 이벤트별 좌석 통계를 한 번에 조회 (ADR-011).
+        // events 1쿼리 + 집계 1쿼리 = 총 2쿼리 (이벤트 수 무관 상수). before의 N+1(1+2N) 해소.
+        List<Long> eventIds = events.stream().map(Event::getId).toList();
+        Map<Long, SeatCountProjection> countsByEventId = eventIds.isEmpty()
+                ? Map.of()
+                : seatRepository.countSeatsByEventIds(eventIds).stream()
+                        .collect(Collectors.toMap(SeatCountProjection::getEventId, c -> c));
+
         List<EventListResponse.EventSummary> summaries = events.stream()
                 .map(event -> {
-                    int totalSeats = seatRepository.countByEventId(event.getId());
-                    int availableSeats = seatRepository.countByEventIdAndStatus(
-                            event.getId(), SeatStatus.AVAILABLE);
+                    SeatCountProjection counts = countsByEventId.get(event.getId());
+                    int totalSeats = counts != null ? (int) counts.getTotal() : 0;
+                    int availableSeats = counts != null ? (int) counts.getAvailable() : 0;
                     return EventListResponse.EventSummary.builder()
                             .eventId(event.getId())
                             .title(event.getTitle())

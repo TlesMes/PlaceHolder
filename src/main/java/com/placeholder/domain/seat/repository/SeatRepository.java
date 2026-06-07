@@ -25,14 +25,16 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     List<Seat> findByEventId(Long eventId);
 
     /**
-     * [Phase D-1 before] 이벤트의 전체 좌석 수. 목록 조회에서 이벤트마다 호출 시 N+1 유발.
+     * 여러 이벤트의 좌석 통계(전체/AVAILABLE)를 GROUP BY로 한 번에 집계한다.
+     * 이벤트 수에 무관하게 쿼리 1개 (ADR-011).
+     * fetch join이 아니라 집계를 쓰는 이유: 카운트 목적에 좌석 전체 로딩은 낭비이고,
+     * 단방향 설계(Event에 seats 컬렉션 없음)를 유지하기 위함.
      */
-    int countByEventId(Long eventId);
-
-    /**
-     * [Phase D-1 before] 이벤트의 특정 상태 좌석 수. 목록 조회에서 이벤트마다 호출 시 N+1 유발.
-     */
-    int countByEventIdAndStatus(Long eventId, SeatStatus status);
+    @Query("select s.event.id as eventId, " +
+           "count(s) as total, " +
+           "sum(case when s.status = com.placeholder.domain.seat.entity.Seat.SeatStatus.AVAILABLE then 1L else 0L end) as available " +
+           "from Seat s where s.event.id in :eventIds group by s.event.id")
+    List<SeatCountProjection> countSeatsByEventIds(@Param("eventIds") List<Long> eventIds);
 
     Optional<Seat> findByEventIdAndLabel(Long eventId, String label);
 
