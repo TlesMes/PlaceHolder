@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.04 기준)
+## 현재 진행 상황 (2026.06.07 기준)
 
 ### 완료된 작업 ✅
 - **Phase A:** 설계 완료
@@ -169,25 +169,30 @@ com.placeholder
   - "차감됐는데 AVAILABLE"·중복 점유 같은 정합성 위반이 없음을 증명
   - 부수: 통합 테스트 이메일 충돌 격리 결함 수정(uniqueId() JVM 단일 시퀀스로 통일), ADR 경로 docs/adr 소문자 통일
 
+- **포인트 충전 (캠페인 쿠폰 상환)** — PR #5 (`feature/coupon-redeem`, 리뷰 대기)
+  - 목적: Phase D에서 confirm happy-path 측정에 필요한 booker 잔액 확보. 무제한 충전 대신 신뢰 경계(쿠폰 상환)로 진입 제한
+  - 충전 코어 분리: BookerAccount.charge() + PointTransaction(CHARGE) — 미래 ADMIN/PG 경로가 재사용
+  - 캠페인 쿠폰: 선착순 max_uses + 유저당 1회 (1회용=max_uses=1로 통합). POST /api/points/redeem (BOOKER)
+  - 동시성: 비관적 락(findByCodeForUpdate, 좌석 hold와 동일 기조) + (coupon_id,user_id) 유니크 제약
+  - 동시성 테스트 4종(exactly-K, 유저당 1회, 미존재, 소진). 전체 39개 통과
+  - ADR-010: 원자적 UPDATE 시도 → 트랜잭션 내 다중 락 혼합 데드락 빈발 → 재시도 비용이 비관적 락 이득 상쇄 → 비관적 락 채택. 초고경합(티켓팅/선착순)은 Redis로 분리(Phase E)
+  - 부수: README/master_plan에서 TeamMoa 비교 언급 제거(별도 docs 커밋)
+
 ### 현재 상태
 - **작업 브랜치:** main (origin/main 동기화 완료)
-- **마지막 커밋:** `Merge pull request #4 ... feature/seat-expiry-scheduler` (a972f62)
-  - Phase C-1·C-2·C-3·C-4 + F-2까지 모두 커밋·머지·푸시 완료
+- **마지막 커밋:** `Merge pull request #5 ... feature/coupon-redeem` (272e1fc)
+  - C-1·C-2·C-3·C-4 + F-2 + 쿠폰 충전까지 모두 머지 완료(PR #1~5)
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
   - GET /api/events - 이벤트 목록, GET /api/events/{id} - 상세, GET /api/events/{id}/seats - 좌석(heldUntil 포함)
   - POST /api/seats/{seatId}/hold - 좌석 홀드 (BOOKER)
   - POST /api/seats/{seatId}/confirm - 예약 확정 (BOOKER)
+  - POST /api/points/redeem - 캠페인 쿠폰 상환→포인트 충전 (BOOKER)
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **Phase C 완료 ✅:** 동시성 제어 ⭐ (프로젝트 핵심)
-   - C-1 ✅ (홀드, PR #1) / C-2 ✅ (확정, PR #2) / C-3 ✅ (자동 만료, PR #4) / C-4 ✅ (정합성 테스트, PR #4)
-   - PR #4 머지 후 main 동기화 필요
-2. **Phase D:** 부하 측정 ⭐ (k6/nGrinder)
-   - 동시성 시나리오 부하 측정 → 적정 scan-interval-ms, 대량 만료 시 배치 분할 필요성 판단 (ADR-009 후속)
-   - 측정 수치 해석·판단은 인간 몫
+1. **Phase D:** 부하 측정 (k6 채택). 쿠폰 충전 → hold/confirm 부하 측정. 수치 해석·판단은 인간 몫
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
