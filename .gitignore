@@ -42,3 +42,6 @@ application-local.yml
 
 ### 임시 학습/작업 노트 (리포에 커밋하지 않음) ###
 docs/_temp/
+
+### 부하 테스트 측정 로그 (산출물, 리포에 커밋하지 않음) ###
+loadtest/*.log

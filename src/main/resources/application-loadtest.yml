@@ -1,0 +1,17 @@
+# Phase D 부하 측정 전용 프로파일.
+# 실행: ./mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=loadtest
+#
+# generate_statistics로 한 요청당 실행된 쿼리 수를 로그에서 확인한다 (N+1 측정의 1차 증거).
+# Session Metrics 로그의 "N JDBC statements" 가 해당 트랜잭션의 쿼리 수.
+spring:
+  # datasource 자격증명은 application.yml과 동일하게 환경변수(${DB_USERNAME}/${DB_PASSWORD}) 사용.
+  # 평문 비밀번호를 커밋하지 않기 위해 여기서 재정의하지 않는다.
+  jpa:
+    show-sql: false   # 통계만으로 충분 — SQL 폭주 로그는 끔
+    properties:
+      hibernate:
+        generate_statistics: true
+
+logging:
+  level:
+    org.hibernate.stat: DEBUG   # Session Metrics(쿼리 수) 출력

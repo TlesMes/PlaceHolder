@@ -24,6 +24,16 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     List<Seat> findByEventId(Long eventId);
 
+    /**
+     * [Phase D-1 before] 이벤트의 전체 좌석 수. 목록 조회에서 이벤트마다 호출 시 N+1 유발.
+     */
+    int countByEventId(Long eventId);
+
+    /**
+     * [Phase D-1 before] 이벤트의 특정 상태 좌석 수. 목록 조회에서 이벤트마다 호출 시 N+1 유발.
+     */
+    int countByEventIdAndStatus(Long eventId, SeatStatus status);
+
     Optional<Seat> findByEventIdAndLabel(Long eventId, String label);
 
     List<Seat> findByEventIdAndStatus(Long eventId, SeatStatus status);

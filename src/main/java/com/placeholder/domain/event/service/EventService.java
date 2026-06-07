@@ -7,6 +7,8 @@ import com.placeholder.domain.event.dto.EventListResponse;
 import com.placeholder.domain.event.entity.Event;
 import com.placeholder.domain.event.repository.EventRepository;
 import com.placeholder.domain.seat.entity.Seat;
+import com.placeholder.domain.seat.entity.Seat.SeatStatus;
+import com.placeholder.domain.seat.repository.SeatRepository;
 import com.placeholder.domain.seat.service.SeatService;
 import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
@@ -26,6 +28,7 @@ public class EventService {
 
     private final EventRepository eventRepository;
     private final SeatService seatService;
+    private final SeatRepository seatRepository;
     private final UserRepository userRepository;
 
     @PreAuthorize("hasRole('PROVIDER')")
@@ -61,13 +64,23 @@ public class EventService {
     public EventListResponse getEvents() {
         List<Event> events = eventRepository.findAll();
 
+        // [Phase D-1 before] 순진한 구현: 이벤트마다 좌석 카운트를 개별 질의 → N+1 발생.
+        // 이벤트 N개 = events 1쿼리 + count 2쿼리 × N = 1 + 2N 쿼리.
+        // Step 5에서 GROUP BY 집계 1쿼리로 교체 예정.
         List<EventListResponse.EventSummary> summaries = events.stream()
-                .map(event -> EventListResponse.EventSummary.builder()
-                        .eventId(event.getId())
-                        .title(event.getTitle())
-                        .venue(event.getVenue())
-                        .eventAt(event.getEventAt())
-                        .build())
+                .map(event -> {
+                    int totalSeats = seatRepository.countByEventId(event.getId());
+                    int availableSeats = seatRepository.countByEventIdAndStatus(
+                            event.getId(), SeatStatus.AVAILABLE);
+                    return EventListResponse.EventSummary.builder()
+                            .eventId(event.getId())
+                            .title(event.getTitle())
+                            .venue(event.getVenue())
+                            .eventAt(event.getEventAt())
+                            .totalSeats(totalSeats)
+                            .availableSeats(availableSeats)
+                            .build();
+                })
                 .toList();
 
         return EventListResponse.builder()

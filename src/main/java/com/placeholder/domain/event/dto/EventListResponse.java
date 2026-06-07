@@ -18,5 +18,7 @@ public class EventListResponse {
         private String title;
         private String venue;
         private LocalDateTime eventAt;
+        private int totalSeats;
+        private int availableSeats;
     }
 }
