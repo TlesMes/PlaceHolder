@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.07 기준)
+## 현재 진행 상황 (2026.06.09 기준)
 
 ### 완료된 작업 ✅
 - **Phase A:** 설계 완료
@@ -178,18 +178,18 @@ com.placeholder
   - ADR-010: 원자적 UPDATE 시도 → 트랜잭션 내 다중 락 혼합 데드락 빈발 → 재시도 비용이 비관적 락 이득 상쇄 → 비관적 락 채택. 초고경합(티켓팅/선착순)은 Redis로 분리(Phase E)
   - 부수: README/master_plan에서 TeamMoa 비교 언급 제거(별도 docs 커밋)
 
-- **Phase D-1: N+1 발견→해결 서사** — (`feature/loadtest-n-plus-one`, 리뷰 대기)
+- **Phase D-1: N+1 발견→해결 서사** — PR #6 (머지 완료)
   - 목적: 부하 측정의 첫 작업으로 **환경 무관 before/after 서사** 확보. 절대 RPS는 하드웨어 종속이라 약하고, 쿼리 수·상대 개선율은 환경 불변
   - 실제 필요 기능("목록에 잔여/총 좌석 수") 추가 → 카운트를 이벤트마다 질의하는 최초 구현이 N+1(1+2N) → 측정으로 정량 확인 → GROUP BY 집계로 해결 → 재측정 검증
   - k6 인프라 최초 구축: `loadtest/`(lib/setup.js 시드, event-list.js 부하). 측정 전용 프로파일 application-loadtest.yml(generate_statistics로 쿼리 수)
   - 측정(로컬, MySQL 8.0 Docker): 쿼리 1+2N→**2**(이벤트 100개 기준 201→2), list p95 **357ms→36ms(~10x)**, 처리량 ~11x
   - ADR-011: fetch join 대신 GROUP BY 집계 채택 — 카운트 목적에 좌석 전체 로딩(fetch join)은 낭비, 단방향 설계 유지, 의도-쿼리 일치. fetch join은 상세 페이지(좌석 실제 표시)용
-  - 전체 39개 테스트 그린 유지(회귀 없음)
+  - 정확성 테스트: EventListSeatCountTest로 status별 집계·좌석 0개·이벤트 간 누수 검증 (k6는 성능만 증명하므로 별도 보강)
 
 ### 현재 상태
-- **작업 브랜치:** feature/loadtest-n-plus-one (Phase D-1, 리뷰 대기)
-- **베이스:** `Merge pull request #5 ... feature/coupon-redeem` (272e1fc) 위
-  - C-1·C-2·C-3·C-4 + F-2 + 쿠폰 충전까지 머지 완료(PR #1~5), Phase D-1 진행 중
+- **작업 브랜치:** main (origin/main 동기화 완료)
+- **마지막 커밋:** `test: 이벤트 목록 좌석 통계 집계 정확성 검증` (91736c6)
+  - C-1~C-4 + F-2 + 쿠폰 충전 + Phase D-1까지 머지 완료(PR #1~6)
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
