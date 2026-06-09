@@ -140,3 +140,38 @@ export function seedForSeatLoad({ charge = false } = {}) {
 
   return { bookerTokens, seatIds };
 }
+
+/**
+ * confirm 격리 측정용 시드. 부하 구간에서 confirm만 호출할 수 있도록 좌석을 미리 HELD로 만든다.
+ *
+ * confirm의 선행 조건(ReservationService.validateHold) 때문에 사전 hold가 필수다:
+ *   1. 좌석이 HELD 상태  2. 본인이 hold한 좌석(holder 일치)  3. hold 미만료(TTL 5분 내)
+ * 그래서 좌석마다 어느 booker가 hold했는지 토큰을 함께 묶어 반환한다.
+ *
+ * ⚠️ confirm은 좌석을 소비(HELD→CONFIRMED)한다. 미리 hold한 좌석 수만큼만 confirm 가능하므로
+ *    부하 총량(도착률×측정시간)보다 좌석 풀이 커야 한다. 또 TTL 5분 안에 측정이 끝나야 한다
+ *    (만료된 hold는 confirm 불가). holds 배열은 부하 구간에서 1좌석=1회 소진된다.
+ *
+ * 리턴: { holds }  — holds: [{ seatId, token }] (잔액은 charge로 이미 채워짐)
+ */
+export function seedForConfirmLoad() {
+  const { bookerTokens, seatIds } = seedForSeatLoad({ charge: true });
+
+  const holds = [];
+  for (let i = 0; i < seatIds.length; i++) {
+    const seatId = seatIds[i];
+    const token = bookerTokens[i % bookerTokens.length];
+    const res = http.post(`${BASE_URL}/api/seats/${seatId}/hold`, null, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    // 시드 단계 hold는 경합이 없어 모두 성공해야 한다. 실패 시 측정 전제가 깨지므로 중단.
+    if (!check(res, { 'pre-hold 200': (r) => r.status === 200 })) {
+      fail(`pre-hold failed for seat ${seatId}: ${res.status} ${res.body}`);
+    }
+    holds.push({ seatId, token });
+  }
+
+  console.log(`confirm load seed: ${holds.length} seats pre-held`);
+
+  return { holds };
+}
