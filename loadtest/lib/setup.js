@@ -19,6 +19,10 @@ const EVENT_COUNT = parseInt(__ENV.EVENT_COUNT || '100');
 const SEATS_PER_EVENT = parseInt(__ENV.SEATS_PER_EVENT || '50');
 const BOOKER_COUNT = parseInt(__ENV.BOOKER_COUNT || '20');
 
+// confirm 부하용 booker 잔액. 쿠폰은 유저당 1회 제약이라 booker마다 전용 코드 1장을 만들고
+// 각자 1회 상환한다(유저당 1회 제약을 건드리지 않음). 좌석가(1000) 대비 충분히 크게.
+const BOOKER_CHARGE = parseInt(__ENV.BOOKER_CHARGE || '100000000');
+
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 function signup(email, role) {
@@ -36,6 +40,23 @@ function login(email) {
     fail(`login failed for ${email}: ${res.status} ${res.body}`);
   }
   return res.json('accessToken');
+}
+
+// booker 1명에게 전용 쿠폰 1장을 만들고 즉시 상환시켜 잔액을 채운다.
+// 쿠폰 생성은 @Profile("loadtest") 전용 엔드포인트(POST /api/loadtest/coupons)를 사용한다.
+function chargeBooker(index, bookerToken) {
+  const code = `LOADTEST-BOOKER-${index}`;
+  // 1. 전용 쿠폰 생성 (멱등 — 재실행 시 기존 쿠폰 반환). 인증 불필요(프로파일 전용 경로 permitAll).
+  const createRes = http.post(`${BASE_URL}/api/loadtest/coupons`, JSON.stringify({
+    code, amount: BOOKER_CHARGE, maxUses: 1,
+  }), { headers: JSON_HEADERS });
+  if (!check(createRes, { 'coupon created': (r) => r.status === 201 })) {
+    fail(`coupon create failed for ${code}: ${createRes.status} ${createRes.body}`);
+  }
+  // 2. 상환 → booker 잔액 적립. 재실행 시 이미 상환했으면 409류 → 무시(이미 잔액 보유).
+  http.post(`${BASE_URL}/api/points/redeem`, JSON.stringify({ code }), {
+    headers: { ...JSON_HEADERS, 'Authorization': `Bearer ${bookerToken}` },
+  });
 }
 
 export function seedData() {
@@ -79,4 +100,43 @@ export function seedData() {
   console.log(`seed done: ${eventIds.length} events x ${SEATS_PER_EVENT} seats, ${bookerTokens.length} bookers`);
 
   return { providerToken, bookerTokens, eventIds };
+}
+
+// 한 이벤트의 좌석 ID 목록을 조회한다 (GET /api/events/{id}/seats).
+function fetchSeatIds(eventId) {
+  const res = http.get(`${BASE_URL}/api/events/${eventId}/seats`);
+  if (!check(res, { 'seats 200': (r) => r.status === 200 })) {
+    fail(`seat fetch failed for event ${eventId}: ${res.status} ${res.body}`);
+  }
+  return res.json('seats').map((s) => s.seatId);
+}
+
+/**
+ * hold/confirm 부하용 시드.
+ *   - seedData()로 provider/event/booker 생성
+ *   - 모든 이벤트의 좌석 ID를 평탄화한 seatIds 풀 수집 (VU가 분산/경합 모드로 선택)
+ *   - charge=true면 booker마다 잔액 충전 (confirm 측정용)
+ *
+ * 리턴: { bookerTokens, seatIds }
+ *   seatIds: 전체 좌석 ID 배열 (EVENT_COUNT × SEATS_PER_EVENT개). 좌석 소진을 피하려면
+ *            부하 총량보다 충분히 크게 시드하고 VU가 고르게 분산 선택한다.
+ */
+export function seedForSeatLoad({ charge = false } = {}) {
+  const { bookerTokens, eventIds } = seedData();
+
+  const seatIds = [];
+  for (const eventId of eventIds) {
+    for (const seatId of fetchSeatIds(eventId)) {
+      seatIds.push(seatId);
+    }
+  }
+
+  if (charge) {
+    bookerTokens.forEach((token, i) => chargeBooker(i, token));
+    console.log(`charged ${bookerTokens.length} bookers (${BOOKER_CHARGE} each)`);
+  }
+
+  console.log(`seat load seed: ${seatIds.length} seats in pool`);
+
+  return { bookerTokens, seatIds };
 }
