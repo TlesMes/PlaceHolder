@@ -36,7 +36,9 @@ const confirmError = new Counter('confirm_error');
 const seatExhausted = new Counter('seat_exhausted');   // 미리 hold한 좌석을 다 써버린 횟수
 
 const START_RATE = parseInt(__ENV.START_RATE || '50');
-const MAX_RATE = parseInt(__ENV.MAX_RATE || '400');
+// 상한은 높게 — 고정 상한을 낮게 박으면 안 꺾인 채 통과해 knee를 놓친다. 실제 종료는 abortOnFail.
+// 단 confirm은 좌석을 1회 소비하므로 상한이 높을수록 사전 hold할 좌석 풀(EVENT_COUNT)도 커야 한다.
+const MAX_RATE = parseInt(__ENV.MAX_RATE || '3000');
 const STAGE_DURATION = __ENV.STAGE_DURATION || '30s';
 
 export const options = {
@@ -45,20 +47,25 @@ export const options = {
       executor: 'ramping-arrival-rate',
       startRate: START_RATE,
       timeUnit: '1s',
+      // 올리기만 한다(open-loop). 에러가 나면 abortOnFail이 중단하므로 보통 상한 전에 멈춘다.
       stages: [
         { target: START_RATE, duration: STAGE_DURATION },
+        { target: Math.round(MAX_RATE * 0.1), duration: STAGE_DURATION },
         { target: Math.round(MAX_RATE * 0.25), duration: STAGE_DURATION },
         { target: Math.round(MAX_RATE * 0.5), duration: STAGE_DURATION },
         { target: Math.round(MAX_RATE * 0.75), duration: STAGE_DURATION },
         { target: MAX_RATE, duration: STAGE_DURATION },
       ],
       preAllocatedVUs: 200,
-      maxVUs: 2000,
+      maxVUs: 3000,
     },
   },
   thresholds: {
-    'confirm_error': ['count<1'],
-    'seat_exhausted': ['count<1'],   // 좌석 고갈 = 풀이 작아 측정 무효. 0이어야 함
+    // ★ 에러(5xx/타임아웃) 발생 = 한계 도달 → 자동 중단. "안 터지고 통과" 방지.
+    'confirm_error': [{ threshold: 'count<1', abortOnFail: true }],
+    // seat_exhausted는 abort하지 않는다. 좌석 고갈은 시스템 한계가 아니라 시드 부족 —
+    // 중단이 아니라 EVENT_COUNT를 키워 재측정해야 할 신호다(0이어야 측정 유효).
+    'seat_exhausted': ['count<1'],
   },
 };
 

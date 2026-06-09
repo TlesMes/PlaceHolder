@@ -77,8 +77,14 @@ k6 run -e EVENT_COUNT=400 loadtest/hold.js
 k6 run -e EVENT_COUNT=200 -e START_RATE=50 -e MAX_RATE=400 loadtest/confirm.js
 ```
 
-knee 측정 절차: 1차로 넓게(START_RATE→MAX_RATE) 훑어 knee 구간 파악 → 2차로 그 구간만
-`START_RATE`를 끌어올려 좁게 재측정. **수치 해석·판단은 인간 몫**(ADR 결론 포함).
+**종료 방식 — 에러 시 자동 중단(abortOnFail).** 고정 상한을 낮게 박으면 시스템이 안 꺾인 채
+그냥 통과해버려 knee를 놓친다. 그래서 `MAX_RATE`는 "절대 안 버틸" 만큼 높게 잡고, 실제 종료는
+**5xx/타임아웃(`*_error`)이 처음 발생하는 지점** = 시스템 한계가 결정한다. 도착률은 올리기만 하고
+내리지 않는다(open-loop) — "성공하면 2배, 지연 늘면 감소" 같은 수렴식 조절은 측정기와 시스템이
+피드백으로 엮여 knee 곡선을 뭉개므로 쓰지 않는다.
+
+knee 구간을 더 촘촘히 보고 싶으면 `START_RATE`를 그 부근으로 끌어올려 좁게 재측정.
+**수치 해석·판단은 인간 몫**(ADR 결론 포함).
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|

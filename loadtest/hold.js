@@ -36,7 +36,9 @@ const holdRejected = new Counter('hold_rejected');
 const holdError = new Counter('hold_error');
 
 const START_RATE = parseInt(__ENV.START_RATE || '50');
-const MAX_RATE = parseInt(__ENV.MAX_RATE || '800');
+// 상한은 "절대 안 버틸" 만큼 높게 잡는다. 고정 상한을 낮게 박으면 시스템이 안 꺾인 채
+// 그냥 통과해버려 knee를 놓친다. 실제 종료는 아래 abortOnFail이 결정한다(에러 = 진짜 한계).
+const MAX_RATE = parseInt(__ENV.MAX_RATE || '5000');
 const STAGE_DURATION = __ENV.STAGE_DURATION || '30s';
 
 export const options = {
@@ -45,21 +47,26 @@ export const options = {
       executor: 'ramping-arrival-rate',
       startRate: START_RATE,        // 0이 아니라 이 도착률에서 출발 (저부하 구간 스킵)
       timeUnit: '1s',
-      // 계단식 ramp로 knee 부근까지 도착률을 끌어올린다. knee를 찾은 뒤 START/MAX로 좁혀 재측정.
+      // 도착률을 계속 끌어올린다. 시스템이 꺾여 에러가 나는 순간 abortOnFail이 멈추므로,
+      // 상한까지 가기 전에 보통 중단된다. 곡선 형태를 보존하려 내리지 않고 올리기만 한다(open-loop).
       stages: [
         { target: START_RATE, duration: STAGE_DURATION },
+        { target: Math.round(MAX_RATE * 0.1), duration: STAGE_DURATION },
         { target: Math.round(MAX_RATE * 0.25), duration: STAGE_DURATION },
         { target: Math.round(MAX_RATE * 0.5), duration: STAGE_DURATION },
         { target: Math.round(MAX_RATE * 0.75), duration: STAGE_DURATION },
         { target: MAX_RATE, duration: STAGE_DURATION },
       ],
       preAllocatedVUs: 200,
-      maxVUs: 2000,
+      maxVUs: 3000,
     },
   },
   thresholds: {
-    // 5xx/타임아웃만 실패로 본다. 4xx(이미 점유)는 정상 거절이라 임계에서 제외.
-    'hold_error': ['count<1'],
+    // ★ 에러(5xx/타임아웃) 발생 = 시스템 한계 도달로 보고 테스트를 자동 중단.
+    //   상한을 높게 잡아도 여기서 멈추므로 "안 터지고 통과"가 불가능하다.
+    //   4xx(이미 점유)는 정상 거절이라 기준에서 제외 — hold_error엔 5xx/timeout만 집계된다.
+    //   (threshold 평가는 주기적이라 첫 에러 후 한 박자 더 부하가 나간 뒤 중단된다 — knee 직전 데이터 보존.)
+    'hold_error': [{ threshold: 'count<1', abortOnFail: true }],
   },
 };
 
