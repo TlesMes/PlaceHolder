@@ -41,4 +41,16 @@ public interface PointTransactionRepository extends JpaRepository<PointTransacti
             @Param("cursor") LocalDateTime cursor,
             Pageable pageable);
 
+    /**
+     * 제공자 정산 거래 목록 — SETTLE 타입만, reservation/seat/event fetch join.
+     * 사용자당 정산 건수가 작은 도메인이라 페이징 미적용.
+     */
+    @Query("select pt from PointTransaction pt " +
+           "join fetch pt.reservation r " +
+           "join fetch r.seat s " +
+           "join fetch s.event " +
+           "where pt.user.id = :providerId " +
+           "and pt.type = com.placeholder.domain.point.entity.PointTransaction.TransactionType.SETTLE " +
+           "order by pt.createdAt desc")
+    List<PointTransaction> findSettlementsByProviderId(@Param("providerId") Long providerId);
 }
