@@ -7,6 +7,7 @@ import com.placeholder.domain.point.entity.PointTransaction.TransactionType;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
 import com.placeholder.domain.provider.entity.ProviderAccount;
 import com.placeholder.domain.provider.repository.ProviderAccountRepository;
+import com.placeholder.domain.reservation.dto.MyReservationsResponse;
 import com.placeholder.domain.reservation.dto.ReservationConfirmResponse;
 import com.placeholder.domain.reservation.entity.Reservation;
 import com.placeholder.domain.reservation.repository.ReservationRepository;
@@ -24,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @SuppressWarnings("null")
 @Service
@@ -95,6 +97,32 @@ public class ReservationService {
                 .paidAmount(price)
                 .confirmedAt(reservation.getConfirmedAt())
                 .remainingBalance(bookerAccount.getBalance())
+                .build();
+    }
+
+    public MyReservationsResponse getMyReservations(Long bookerId) {
+        List<Reservation> reservations =
+                reservationRepository.findMyReservationsWithSeatAndEvent(bookerId);
+
+        List<MyReservationsResponse.ReservationSummary> summaries = reservations.stream()
+                .map(r -> {
+                    Seat seat = r.getSeat();
+                    return MyReservationsResponse.ReservationSummary.builder()
+                            .reservationId(r.getId())
+                            .eventId(seat.getEvent().getId())
+                            .eventTitle(seat.getEvent().getTitle())
+                            .eventVenue(seat.getEvent().getVenue())
+                            .eventAt(seat.getEvent().getEventAt())
+                            .seatId(seat.getId())
+                            .seatLabel(seat.getLabel())
+                            .paidAmount(r.getPaidAmount())
+                            .confirmedAt(r.getConfirmedAt())
+                            .build();
+                })
+                .toList();
+
+        return MyReservationsResponse.builder()
+                .reservations(summaries)
                 .build();
     }
 
