@@ -103,103 +103,50 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.09 기준)
+## 현재 진행 상황 (2026.06.10 기준)
+
+> 완료 항목은 "무엇을/왜"만 요약. 구현 디테일·근거는 해당 ADR / PR에서 확인.
 
 ### 완료된 작업 ✅
-- **Phase A:** 설계 완료
-  - 7개 엔티티 구현 (User, BookerAccount, ProviderAccount, Event, Seat, Reservation, PointTransaction)
-  - ERD, 테이블 정의, 초기 ADR
+- **Phase A~B:** 설계 + 기반 (머지 완료)
+  - 엔티티 7종, Repository 7종, ERD/테이블 정의/초기 ADR
+  - 기본 CRUD API(Event/Seat), Exception 인프라, DTO/Service/Controller 레이어
+  - 회원가입 단일 트랜잭션(User + Booker/Provider), 역할 검증 fail-fast
+  - JWT 인증/인가(로그인 발급, 필터, @PreAuthorize 역할 제어)
+  - 후속 보안/테스트 개선: soft delete 필터링, 401/403 의미 분리, 인증 테스트 4종
 
-- **Phase B-1:** Repository 계층
-  - 7개 JpaRepository 인터페이스 구현
-  - 커스텀 쿼리 메서드 정의 (findByEventId, findByStatusAndHeldUntilBefore 등)
+- **Phase C: 좌석 동시성** (PR #1~4, 머지 완료)
+  - **C-1 홀드(비관적 락):** `findByIdForUpdate`로 행 잠금 → 한 명만 성공. AVAILABLE→HELD, held_until TTL 5분. lazy 만료(ADR-008). `POST /api/seats/{id}/hold`
+  - **C-2 확정(원자성):** 좌석·BookerAccount 락 → [포인트 차감 + 정산 적립 + CONFIRMED + Reservation + PointTransaction] 단일 트랜잭션, 잔액 부족 시 전체 롤백. `POST /api/seats/{id}/confirm`
+  - **C-3 자동 만료(스케줄러):** 후보 ID 무락 조회 → 행별 재잠금 → 만료 재확인 → release (TOCTOU 방어). lazy 만료를 안전망으로 병행(ADR-009)
+  - **C-4 정합성 테스트:** 만료 vs confirm/hold 경쟁 5종으로 위반 부재 증명
 
-- **Phase B-4:** 기본 CRUD API
-  - Exception 인프라 (GlobalExceptionHandler, ErrorResponse, 커스텀 예외 4개)
-  - DTO 레이어 (Event 4개, Seat 1개)
-  - Service 레이어 (EventService, SeatService)
-  - Controller 레이어 (EventController - 4개 엔드포인트)
-  - SecurityConfig (임시 - 모든 요청 허용)
-  - application.yml batch insert 설정
-  - **API 테스트 완료:** 이벤트 등록/조회 정상 동작
+- **포인트 충전 (쿠폰 상환)** — PR #5 (`feature/coupon-redeem`, 리뷰 대기)
+  - 목적: confirm 측정에 필요한 booker 잔액 확보. 무제한 대신 쿠폰 상환으로 진입 제한
+  - 비관적 락 + (coupon_id,user_id) 유니크. `POST /api/points/redeem`. ADR-010(비관적 락 채택 근거)
 
-- **Phase B-3:** 회원가입 트랜잭션
-  - User + BookerAccount/ProviderAccount 단일 트랜잭션 생성
-  - SignupRequest/Response DTO
-  - 역할 검증 fail-fast (지원하지 않는 역할 → InvalidUserRoleException)
+- **Phase D-1: N+1 발견→해결** — PR #6 (머지 완료)
+  - "목록에 잔여/총 좌석 수" 추가가 N+1(1+2N) → GROUP BY 집계로 쿼리 1+2N→2, list p95 ~10x 개선
+  - k6 인프라 최초 구축(`loadtest/`). ADR-011(fetch join 대신 집계 채택). 정확성 테스트 보강
 
-- **Phase B-2:** JWT 인증/인가
-  - 로그인 API (JWT 발급), JwtProvider/JwtAuthenticationFilter
-  - SecurityConfig 교체 (providerId 파라미터 제거 → SecurityContext)
-  - 역할 기반 접근 제어 (@PreAuthorize + @EnableMethodSecurity)
+- **Phase E-3: 조회 API (백엔드)** — PR #8 (머지 완료)
+  - 자기 데이터 조회 3종 → 마이페이지·정산 대시보드 토대
+    - `GET /api/reservations/my` (BOOKER): fetch join으로 N+1 회피
+    - `GET /api/points/history` (BOOKER/PROVIDER): cursor 페이징(created_at < cursor DESC, size 20/max 100, from default now-3개월)
+    - `GET /api/providers/my/settlement` (PROVIDER): 잔액 + SETTLE 목록
+  - 인덱스 추가 없이 기존 단일 `idx_pt_user_id` 유지(도메인상 사용자당 거래 소량). ADR-012
+  - 서비스 단위 테스트는 별도 PR(Docker 환경)로 분리
 
-- **보안/테스트 개선** (Phase B 후속)
-  - soft delete 쿼리 필터링 (findBy...AndDeletedAtIsNull) 적용
-  - 401/403 의미 분리 (JwtAuthenticationEntryPoint → 인증 실패 401, @PreAuthorize → 인가 실패 403)
-  - 인증 DTO @Builder 적용 (테스트 리플렉션 제거)
-  - 테스트: AuthServiceTest, SignupTransactionTest, AccessControlTest, UserRepositoryTest
-
-- **Phase C-1:** 좌석 홀드 (비관적 락) — PR #1
-  - SELECT ... FOR UPDATE(findByIdForUpdate)로 좌석 행 잠금 → 동시 요청 시 한 명만 성공
-  - status AVAILABLE → HELD, held_by/held_until(TTL 5분) 설정
-  - lazy 만료 정책(ADR-008): held_until 경과한 HELD는 재점유 가능
-  - POST /api/seats/{seatId}/hold (BOOKER), 동시성 테스트 포함
-
-- **Phase C-2:** 예약 확정 (트랜잭션 원자성) — PR #2
-  - 좌석·BookerAccount 비관적 락 → [포인트 차감 + 제공자 정산 적립 + 좌석 CONFIRMED + Reservation + PointTransaction 2건] 단일 트랜잭션
-  - 잔액 부족 시 InsufficientPointException으로 전체 롤백
-  - POST /api/seats/{seatId}/confirm (BOOKER)
-
-- **Phase F-2:** BOOKER 좌석 예약 프론트엔드 — PR #3
-  - React + Vite + TailwindCSS. 동시성(홀드/확정)을 시각적으로 검증하는 용도
-  - 좌석 그리드(AVAILABLE/HELD/CONFIRMED 3색), useSeatPolling 2.5초 폴링 실시간 갱신
-  - 홀드 → 결제 페이지(URL 이동) → 결제수단·예약자정보 입력 → 확정 흐름
-  - 만료된 HELD를 AVAILABLE로 취급(effectiveStatus, 서버 lazy 만료와 일치)
-  - 백엔드: SeatResponse.SeatInfo에 heldUntil 추가 (프론트 만료 시각 인식용)
-
-- **Phase C-3:** 좌석 홀드 자동 만료 해제 (스케줄러 폴링) — PR #4
-  - SeatExpiryScheduler(@Scheduled, fixedDelay)가 SeatExpiryService(@Transactional)에 위임 (self-invocation 함정 회피)
-  - 후보 ID를 락 없이 조회(findExpiredHeldSeatIds, ID projection) → 행별 findByIdForUpdate로 개별 재잠금 → 락 보유 상태에서 만료 재확인 → Seat.release()로 AVAILABLE 전이 (TOCTOU 방어)
-  - 기존 lazy 만료(isHoldable)는 스캔 주기 빈틈 보정 안전망으로 유지
-  - 만료 해제 전략 결정: ADR-009 (스케줄러 폴링 + lazy 안전망 병행). 폴링 부하/배치 분할은 Phase D 측정 후 조정
-  - scan-interval-ms 기본 60초(application.yml), 테스트는 사실상 비활성 후 직접 호출
-
-- **Phase C-4:** 동시성 정합성 테스트 — PR #4
-  - SeatExpiryConcurrencyTest: 만료 vs confirm/hold 동시 경쟁 5개 시나리오 (CountDownLatch/ExecutorService)
-  - "차감됐는데 AVAILABLE"·중복 점유 같은 정합성 위반이 없음을 증명
-  - 부수: 통합 테스트 이메일 충돌 격리 결함 수정(uniqueId() JVM 단일 시퀀스로 통일), ADR 경로 docs/adr 소문자 통일
-
-- **포인트 충전 (캠페인 쿠폰 상환)** — PR #5 (`feature/coupon-redeem`, 리뷰 대기)
-  - 목적: Phase D에서 confirm happy-path 측정에 필요한 booker 잔액 확보. 무제한 충전 대신 신뢰 경계(쿠폰 상환)로 진입 제한
-  - 충전 코어 분리: BookerAccount.charge() + PointTransaction(CHARGE) — 미래 ADMIN/PG 경로가 재사용
-  - 캠페인 쿠폰: 선착순 max_uses + 유저당 1회 (1회용=max_uses=1로 통합). POST /api/points/redeem (BOOKER)
-  - 동시성: 비관적 락(findByCodeForUpdate, 좌석 hold와 동일 기조) + (coupon_id,user_id) 유니크 제약
-  - 동시성 테스트 4종(exactly-K, 유저당 1회, 미존재, 소진). 전체 39개 통과
-  - ADR-010: 원자적 UPDATE 시도 → 트랜잭션 내 다중 락 혼합 데드락 빈발 → 재시도 비용이 비관적 락 이득 상쇄 → 비관적 락 채택. 초고경합(티켓팅/선착순)은 Redis로 분리(Phase E)
-  - 부수: README/master_plan에서 TeamMoa 비교 언급 제거(별도 docs 커밋)
-
-- **Phase D-1: N+1 발견→해결 서사** — PR #6 (머지 완료)
-  - 목적: 부하 측정의 첫 작업으로 **환경 무관 before/after 서사** 확보. 절대 RPS는 하드웨어 종속이라 약하고, 쿼리 수·상대 개선율은 환경 불변
-  - 실제 필요 기능("목록에 잔여/총 좌석 수") 추가 → 카운트를 이벤트마다 질의하는 최초 구현이 N+1(1+2N) → 측정으로 정량 확인 → GROUP BY 집계로 해결 → 재측정 검증
-  - k6 인프라 최초 구축: `loadtest/`(lib/setup.js 시드, event-list.js 부하). 측정 전용 프로파일 application-loadtest.yml(generate_statistics로 쿼리 수)
-  - 측정(로컬, MySQL 8.0 Docker): 쿼리 1+2N→**2**(이벤트 100개 기준 201→2), list p95 **357ms→36ms(~10x)**, 처리량 ~11x
-  - ADR-011: fetch join 대신 GROUP BY 집계 채택 — 카운트 목적에 좌석 전체 로딩(fetch join)은 낭비, 단방향 설계 유지, 의도-쿼리 일치. fetch join은 상세 페이지(좌석 실제 표시)용
-  - 정확성 테스트: EventListSeatCountTest로 status별 집계·좌석 0개·이벤트 간 누수 검증 (k6는 성능만 증명하므로 별도 보강)
-
-- **Phase E-3: 조회 기능 (예약 내역 / 포인트 이력 / 정산 내역)** — PR (작업 중, `feature/e3-history-queries`)
-  - 사용자 자기 데이터 조회 API 3종 추가 → 마이페이지·정산 대시보드 백엔드 토대
-    - `GET /api/reservations/my` (BOOKER): 내 예약 내역 (Reservation→Seat→Event fetch join, N+1 회피)
-    - `GET /api/points/history?from=&to=&cursor=&size=` (BOOKER/PROVIDER): 포인트 이력 cursor 페이징
-    - `GET /api/providers/my/settlement` (PROVIDER): settlementBalance + SETTLE 거래 목록
-  - 포인트 이력 cursor 페이징: WHERE user_id=? AND created_at < cursor ORDER BY created_at DESC LIMIT size. nextCursor=마지막 item createdAt(없으면 null), size default 20·max 100 clamp, from default `now-3개월`
-  - **인덱스 추가 없음**: 기존 단일 `idx_pt_user_id` 유지. 도메인 분석상 사용자당 거래 누적이 연 수십~수백 행 수준이라 복합 `(user_id, created_at)`의 이득(filesort 회피) < 비용(쓰기/디스크)
-  - ADR-012: 거래 이력 append-only 본질 + cursor vs offset + 인덱스 단일 유지 근거 + 복합 전환 조건 명시
-  - **테스트는 별도 PR**(현 세션 Docker/test 실행 어려운 환경). 통합 테스트 시나리오는 plan 파일에 정리됨
+- **Phase E-3: 프론트엔드 + 테마** — PR #9 (`feature/e3-frontend-ui`, 리뷰 대기)
+  - 마이페이지(`/me`, BOOKER): 예약 내역 + 포인트 이력(타입별 색·기간/타입 필터·"더 보기" 시안) 탭 전환
+  - 정산 대시보드(`/provider/settlement`, PROVIDER): 잔액 카드 + SETTLE 테이블
+  - ProtectedRoute에 `requiredRole` 추가(역할 보호). **UI/UX 단계 — 모의 데이터 하드코딩**, 객체 형태만 백엔드 DTO와 1:1(API 연결은 다음)
+  - 다크/라이트 테마: 의미 기반 색상 토큰(CSS 변수, `darkMode:'class'`) + 토글(localStorage 영속, FOUC 방지). 기존 색 하드코딩 전량 토큰화
 
 ### 현재 상태
-- **작업 브랜치:** `feature/e3-history-queries` (Phase E-3 작업 중)
-- **마지막 main 커밋:** `docs: 진행상황 갱신 (Phase D-1 머지 완료 반영)` (9f4acd1)
-  - C-1~C-4 + F-2 + 쿠폰 충전 + Phase D-1까지 머지 완료(PR #1~6)
+- **작업 브랜치:** `feature/e3-frontend-ui` (PR #9 리뷰 대기)
+- **마지막 main 커밋:** `docs: 마스터 플랜에서 기간 표기 제거` (69ccc0a)
+  - PR #1~6, #8 머지 완료. #5(쿠폰)·#9(프론트/테마)는 리뷰 대기
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -213,9 +160,9 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **E-3 테스트 PR**: MyReservationsServiceTest / PointHistoryServiceTest / ProviderSettlementServiceTest. Docker 가능 환경에서 별도 진행
-2. **E-3 프론트엔드**: 마이페이지(예약 내역 + 포인트 이력 무한 스크롤), 정산 대시보드. 별도 세션
-3. **Phase D-2**: hold/confirm knee point 측정 (별도 브랜치 `feature/loadtest-hold-confirm-knee`, draft PR #7 재개). 1차 측정 결과 5xx 0 → abort/knee 기준 재정의 결정 대기 중. 자세한 인수인계는 `loadtest/HANDOFF-D2.md`
+1. **E-3 프론트엔드 API 연결**: PR #9의 모의 데이터를 실제 API로 교체(`api/` 모듈, cursor 페이징 실동작, 기간/타입 필터 서버 반영)
+2. **E-3 테스트 PR**: MyReservationsServiceTest / PointHistoryServiceTest / ProviderSettlementServiceTest. Docker 가능 환경에서 별도 진행
+3. **Phase D-2**: hold/confirm knee point 측정 (별도 브랜치 `feature/loadtest-hold-confirm-knee`, draft PR #7 재개). 1차 측정 결과 5xx 0 → abort/knee 기준 재정의 결정 대기 중. 인수인계: `loadtest/HANDOFF-D2.md`
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
@@ -240,7 +187,8 @@ com.placeholder
   ├── security/ (CustomUserDetails(Service), JwtAuthenticationEntryPoint)
   └── config/ (SecurityConfig, WebConfig - CORS)
   ```
-- **프론트엔드 구조:** `frontend/src/` — pages(Login/Signup/EventList/EventDetail/Checkout), components(SeatGrid/SeatCell/Header/Layout 등), context(Auth/Toast), hooks(useSeatPolling), lib(jwt/errors/format/seatStyle), api(client/auth/events/seats). 폴링은 useSeatPolling 훅 경계로 분리(추후 SSE 교체점).
+- **프론트엔드 구조:** `frontend/src/` — pages(Login/Signup/EventList/EventDetail/Checkout/MyPage/Settlement), components(SeatGrid/SeatCell/Header/Layout/ThemeToggle 등), context(Auth/Toast/Theme), hooks(useSeatPolling), lib(jwt/errors/format/seatStyle/theme), api(client/auth/events/seats). 폴링은 useSeatPolling 훅 경계로 분리(추후 SSE 교체점).
+  - **색상 토큰:** 색은 의미 기반 토큰(`bg-surface`/`text-fg`/`primary`/`success` 등)으로만 사용. 팔레트 색(slate/indigo…) 직접 하드코딩 금지. 토큰 값은 `index.css`의 `:root`/`.dark` CSS 변수, 정의는 `tailwind.config.js`.
 
 ---
 
