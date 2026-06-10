@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -7,10 +8,13 @@ import LoginPage from './pages/LoginPage';
 import EventListPage from './pages/EventListPage';
 import EventDetailPage from './pages/EventDetailPage';
 import CheckoutPage from './pages/CheckoutPage';
+import MyPage from './pages/MyPage';
+import SettlementPage from './pages/SettlementPage';
 
 export default function App() {
   return (
-    <AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
       <ToastProvider>
         <BrowserRouter>
           <Routes>
@@ -33,10 +37,27 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/me"
+              element={
+                <ProtectedRoute requiredRole="BOOKER">
+                  <MyPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/provider/settlement"
+              element={
+                <ProtectedRoute requiredRole="PROVIDER">
+                  <SettlementPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </BrowserRouter>
       </ToastProvider>
-    </AuthProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

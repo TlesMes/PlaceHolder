@@ -3,26 +3,26 @@
 export const SEAT_STYLE = {
   AVAILABLE: {
     label: '예약 가능',
-    cell: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200 hover:ring-emerald-400 hover:shadow-sm cursor-pointer',
-    dot: 'bg-emerald-400',
+    cell: 'bg-success-soft text-success-soft-fg ring-1 ring-inset ring-success/40 hover:ring-success hover:shadow-sm cursor-pointer',
+    dot: 'bg-success',
   },
   HELD: {
     label: '홀드 중',
-    cell: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200 cursor-not-allowed animate-pulse',
-    dot: 'bg-amber-400',
+    cell: 'bg-warning-soft text-warning-soft-fg ring-1 ring-inset ring-warning/40 cursor-not-allowed animate-pulse',
+    dot: 'bg-warning',
   },
   CONFIRMED: {
     label: '확정됨',
-    cell: 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200 opacity-70 cursor-not-allowed',
-    dot: 'bg-rose-400',
+    cell: 'bg-danger-soft text-danger-soft-fg ring-1 ring-inset ring-danger/40 opacity-70 cursor-not-allowed',
+    dot: 'bg-danger',
   },
 };
 
 // 파생 상태 스타일.
 export const SELECTED_CELL =
-  'bg-emerald-50 text-emerald-800 ring-2 ring-inset ring-indigo-500 shadow-sm cursor-pointer';
+  'bg-success-soft text-success-soft-fg ring-2 ring-inset ring-primary shadow-sm cursor-pointer';
 export const MINE_HELD_CELL =
-  'bg-amber-100 text-amber-800 ring-2 ring-inset ring-amber-400 shadow-sm cursor-pointer';
+  'bg-warning-soft text-warning-soft-fg ring-2 ring-inset ring-warning shadow-sm cursor-pointer';
 
 // 좌석의 "유효 상태"를 계산한다.
 // 서버는 lazy 만료 정책(ADR-008)이라 status=HELD여도 heldUntil이 지났으면 재점유 가능하다.
