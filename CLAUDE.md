@@ -186,9 +186,19 @@ com.placeholder
   - ADR-011: fetch join 대신 GROUP BY 집계 채택 — 카운트 목적에 좌석 전체 로딩(fetch join)은 낭비, 단방향 설계 유지, 의도-쿼리 일치. fetch join은 상세 페이지(좌석 실제 표시)용
   - 정확성 테스트: EventListSeatCountTest로 status별 집계·좌석 0개·이벤트 간 누수 검증 (k6는 성능만 증명하므로 별도 보강)
 
+- **Phase E-3: 조회 기능 (예약 내역 / 포인트 이력 / 정산 내역)** — PR (작업 중, `feature/e3-history-queries`)
+  - 사용자 자기 데이터 조회 API 3종 추가 → 마이페이지·정산 대시보드 백엔드 토대
+    - `GET /api/reservations/my` (BOOKER): 내 예약 내역 (Reservation→Seat→Event fetch join, N+1 회피)
+    - `GET /api/points/history?from=&to=&cursor=&size=` (BOOKER/PROVIDER): 포인트 이력 cursor 페이징
+    - `GET /api/providers/my/settlement` (PROVIDER): settlementBalance + SETTLE 거래 목록
+  - 포인트 이력 cursor 페이징: WHERE user_id=? AND created_at < cursor ORDER BY created_at DESC LIMIT size. nextCursor=마지막 item createdAt(없으면 null), size default 20·max 100 clamp, from default `now-3개월`
+  - **인덱스 추가 없음**: 기존 단일 `idx_pt_user_id` 유지. 도메인 분석상 사용자당 거래 누적이 연 수십~수백 행 수준이라 복합 `(user_id, created_at)`의 이득(filesort 회피) < 비용(쓰기/디스크)
+  - ADR-012: 거래 이력 append-only 본질 + cursor vs offset + 인덱스 단일 유지 근거 + 복합 전환 조건 명시
+  - **테스트는 별도 PR**(현 세션 Docker/test 실행 어려운 환경). 통합 테스트 시나리오는 plan 파일에 정리됨
+
 ### 현재 상태
-- **작업 브랜치:** main (origin/main 동기화 완료)
-- **마지막 커밋:** `test: 이벤트 목록 좌석 통계 집계 정확성 검증` (91736c6)
+- **작업 브랜치:** `feature/e3-history-queries` (Phase E-3 작업 중)
+- **마지막 main 커밋:** `docs: 진행상황 갱신 (Phase D-1 머지 완료 반영)` (9f4acd1)
   - C-1~C-4 + F-2 + 쿠폰 충전 + Phase D-1까지 머지 완료(PR #1~6)
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
@@ -197,10 +207,15 @@ com.placeholder
   - POST /api/seats/{seatId}/hold - 좌석 홀드 (BOOKER)
   - POST /api/seats/{seatId}/confirm - 예약 확정 (BOOKER)
   - POST /api/points/redeem - 캠페인 쿠폰 상환→포인트 충전 (BOOKER)
+  - **GET /api/reservations/my** - 내 예약 내역 (BOOKER) ★ E-3
+  - **GET /api/points/history** - 포인트 이력 cursor 페이징 (BOOKER/PROVIDER) ★ E-3
+  - **GET /api/providers/my/settlement** - 정산 잔액 + SETTLE 거래 목록 (PROVIDER) ★ E-3
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **Phase D-2:** hold/confirm knee point 측정. 부하를 올리며 포화점(무릎)과 직전 안정 p99 측정 — 절대 RPS가 아니라 곡선 형태. 별도 PR. 수치 해석·판단은 인간 몫
+1. **E-3 테스트 PR**: MyReservationsServiceTest / PointHistoryServiceTest / ProviderSettlementServiceTest. Docker 가능 환경에서 별도 진행
+2. **E-3 프론트엔드**: 마이페이지(예약 내역 + 포인트 이력 무한 스크롤), 정산 대시보드. 별도 세션
+3. **Phase D-2**: hold/confirm knee point 측정 (별도 브랜치 `feature/loadtest-hold-confirm-knee`, draft PR #7 재개). 1차 측정 결과 5xx 0 → abort/knee 기준 재정의 결정 대기 중. 자세한 인수인계는 `loadtest/HANDOFF-D2.md`
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
