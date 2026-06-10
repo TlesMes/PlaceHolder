@@ -24,7 +24,7 @@ export default function SeatCell({ seat, isMine, isSelected, disabled, onClick }
       className={`relative flex flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-3 text-center transition disabled:cursor-not-allowed ${cellClass}`}
     >
       {isMine && (
-        <span className="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow">
+        <span className="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-semibold text-white shadow">
           내 홀드
         </span>
       )}
