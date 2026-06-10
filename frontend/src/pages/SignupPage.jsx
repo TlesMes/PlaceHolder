@@ -39,7 +39,7 @@ export default function SignupPage() {
       footer={
         <>
           이미 계정이 있나요?{' '}
-          <Link to="/login" className="font-medium text-indigo-600 hover:text-indigo-700">
+          <Link to="/login" className="font-medium text-primary hover:text-primary-hover">
             로그인
           </Link>
         </>
@@ -64,7 +64,7 @@ export default function SignupPage() {
         />
 
         <div>
-          <span className="mb-1.5 block text-sm font-medium text-slate-700">역할</span>
+          <span className="mb-1.5 block text-sm font-medium text-fg-muted">역할</span>
           <div className="grid grid-cols-2 gap-2">
             {ROLES.map((r) => {
               const active = form.role === r.value;
@@ -75,18 +75,18 @@ export default function SignupPage() {
                   onClick={() => setForm({ ...form, role: r.value })}
                   className={`rounded-lg border px-3 py-2.5 text-left transition ${
                     active
-                      ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-200'
-                      : 'border-slate-200 hover:border-slate-300'
+                      ? 'border-primary bg-primary-soft ring-1 ring-primary/40'
+                      : 'border-border hover:border-fg-subtle'
                   }`}
                 >
                   <span
                     className={`block text-sm font-semibold ${
-                      active ? 'text-indigo-700' : 'text-slate-700'
+                      active ? 'text-primary-soft-fg' : 'text-fg'
                     }`}
                   >
                     {r.label}
                   </span>
-                  <span className="block text-xs text-slate-500">{r.desc}</span>
+                  <span className="block text-xs text-fg-muted">{r.desc}</span>
                 </button>
               );
             })}
@@ -94,7 +94,7 @@ export default function SignupPage() {
         </div>
 
         {error && (
-          <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p>
+          <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">{error}</p>
         )}
         <SubmitButton disabled={submitting}>{submitting ? '가입 중…' : '가입하기'}</SubmitButton>
       </form>

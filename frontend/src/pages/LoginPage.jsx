@@ -38,7 +38,7 @@ export default function LoginPage() {
       footer={
         <>
           계정이 없나요?{' '}
-          <Link to="/signup" className="font-medium text-indigo-600 hover:text-indigo-700">
+          <Link to="/signup" className="font-medium text-primary hover:text-primary-hover">
             회원가입
           </Link>
         </>
@@ -62,7 +62,7 @@ export default function LoginPage() {
           required
         />
         {error && (
-          <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p>
+          <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">{error}</p>
         )}
         <SubmitButton disabled={submitting}>{submitting ? '로그인 중…' : '로그인'}</SubmitButton>
       </form>

@@ -99,10 +99,10 @@ export default function CheckoutPage() {
   if (!seat) {
     return (
       <Layout>
-        <p className="rounded-xl bg-rose-50 px-5 py-4 text-sm text-rose-600">
+        <p className="rounded-xl bg-danger-soft px-5 py-4 text-sm text-danger-soft-fg">
           좌석 정보를 찾을 수 없습니다.
         </p>
-        <Link to={`/events/${id}`} className="mt-4 inline-block text-sm text-indigo-600">
+        <Link to={`/events/${id}`} className="mt-4 inline-block text-sm text-primary">
           ← 좌석 선택으로
         </Link>
       </Layout>
@@ -113,13 +113,13 @@ export default function CheckoutPage() {
     <Layout>
       <Link
         to={`/events/${id}`}
-        className="mb-4 inline-flex items-center text-sm text-slate-500 hover:text-slate-700"
+        className="mb-4 inline-flex items-center text-sm text-fg-muted hover:text-fg"
       >
         ← 좌석 다시 선택
       </Link>
 
-      <h1 className="mb-1 text-2xl font-bold tracking-tight text-slate-900">결제</h1>
-      <p className="mb-6 text-sm text-slate-500">
+      <h1 className="mb-1 text-2xl font-bold tracking-tight text-fg">결제</h1>
+      <p className="mb-6 text-sm text-fg-muted">
         홀드된 좌석은 제한 시간 내에 결제해야 합니다.
       </p>
 
@@ -127,33 +127,33 @@ export default function CheckoutPage() {
         {/* 입력 영역 */}
         <div className="space-y-6">
           {/* 예약자 정보 */}
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <h2 className="mb-4 text-base font-semibold text-slate-900">예약자 정보</h2>
+          <section className="rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+            <h2 className="mb-4 text-base font-semibold text-fg">예약자 정보</h2>
             <div className="space-y-4">
               <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-slate-700">이름</span>
+                <span className="mb-1.5 block text-sm font-medium text-fg-muted">이름</span>
                 <input
                   value={bookerName}
                   onChange={(e) => setBookerName(e.target.value)}
                   placeholder="홍길동"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg outline-none transition placeholder:text-fg-subtle focus:border-primary focus:ring-2 focus:ring-primary/20"
                 />
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-slate-700">연락처</span>
+                <span className="mb-1.5 block text-sm font-medium text-fg-muted">연락처</span>
                 <input
                   value={bookerPhone}
                   onChange={(e) => setBookerPhone(e.target.value)}
                   placeholder="010-1234-5678"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg outline-none transition placeholder:text-fg-subtle focus:border-primary focus:ring-2 focus:ring-primary/20"
                 />
               </label>
             </div>
           </section>
 
           {/* 결제수단 */}
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <h2 className="mb-4 text-base font-semibold text-slate-900">결제수단</h2>
+          <section className="rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+            <h2 className="mb-4 text-base font-semibold text-fg">결제수단</h2>
             <div className="grid gap-2 sm:grid-cols-3">
               {PAY_METHODS.map((m) => {
                 const active = method === m.value;
@@ -164,14 +164,14 @@ export default function CheckoutPage() {
                     onClick={() => setMethod(m.value)}
                     className={`flex flex-col items-center gap-1 rounded-xl border px-3 py-4 transition ${
                       active
-                        ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-200'
-                        : 'border-slate-200 hover:border-slate-300'
+                        ? 'border-primary bg-primary-soft ring-1 ring-primary/40'
+                        : 'border-border hover:border-fg-subtle'
                     }`}
                   >
                     <span className="text-xl">{m.icon}</span>
                     <span
                       className={`text-sm font-medium ${
-                        active ? 'text-indigo-700' : 'text-slate-700'
+                        active ? 'text-primary-soft-fg' : 'text-fg'
                       }`}
                     >
                       {m.label}
@@ -180,7 +180,7 @@ export default function CheckoutPage() {
                 );
               })}
             </div>
-            <p className="mt-3 text-xs text-slate-400">
+            <p className="mt-3 text-xs text-fg-subtle">
               * 데모 환경에서는 결제수단 선택과 무관하게 보유 포인트로 확정됩니다.
             </p>
           </section>
@@ -188,31 +188,31 @@ export default function CheckoutPage() {
 
         {/* 요약 영역 */}
         <aside className="lg:sticky lg:top-20 lg:self-start">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-base font-semibold text-slate-900">주문 요약</h2>
+          <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+            <h2 className="mb-4 text-base font-semibold text-fg">주문 요약</h2>
 
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <dt className="text-slate-500">이벤트</dt>
-                <dd className="font-medium text-slate-900">{event?.title ?? '-'}</dd>
+                <dt className="text-fg-muted">이벤트</dt>
+                <dd className="font-medium text-fg">{event?.title ?? '-'}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-500">좌석</dt>
-                <dd className="font-medium text-slate-900">{seat.label}</dd>
+                <dt className="text-fg-muted">좌석</dt>
+                <dd className="font-medium text-fg">{seat.label}</dd>
               </div>
-              <div className="flex justify-between border-t border-slate-100 pt-2">
-                <dt className="text-slate-500">결제 금액</dt>
-                <dd className="text-base font-bold text-indigo-600">{formatPrice(seat.price)}</dd>
+              <div className="flex justify-between border-t border-border pt-2">
+                <dt className="text-fg-muted">결제 금액</dt>
+                <dd className="text-base font-bold text-primary">{formatPrice(seat.price)}</dd>
               </div>
             </dl>
 
             {heldUntil ? (
-              <div className="mt-4 flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              <div className="mt-4 flex items-center justify-between rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg">
                 <span>결제 제한 시간</span>
                 <Countdown until={heldUntil} className="font-semibold tabular-nums" />
               </div>
             ) : (
-              <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+              <p className="mt-4 rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted">
                 새로고침으로 홀드 추적이 끊겼습니다. 제한 시간은 좌석 홀드 시점부터 계산됩니다.
               </p>
             )}
@@ -220,7 +220,7 @@ export default function CheckoutPage() {
             <button
               onClick={handlePay}
               disabled={submitting}
-              className="mt-5 w-full rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
+              className="mt-5 w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white transition hover:bg-primary-hover disabled:opacity-60"
             >
               {submitting ? '결제 처리 중…' : `${formatPrice(seat.price)} 결제하기`}
             </button>

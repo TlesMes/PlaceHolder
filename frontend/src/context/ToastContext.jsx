@@ -5,9 +5,9 @@ const ToastContext = createContext(null);
 let idSeq = 0;
 
 const VARIANT_STYLE = {
-  success: 'bg-emerald-600',
-  error: 'bg-rose-600',
-  info: 'bg-slate-800',
+  success: 'bg-success text-white',
+  error: 'bg-danger text-white',
+  info: 'bg-fg text-base',
 };
 
 export function ToastProvider({ children }) {
@@ -39,7 +39,7 @@ export function ToastProvider({ children }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`${VARIANT_STYLE[t.variant]} animate-toast-in rounded-lg px-4 py-3 text-sm font-medium text-white shadow-lg`}
+            className={`${VARIANT_STYLE[t.variant]} animate-toast-in rounded-lg px-4 py-3 text-sm font-medium shadow-lg`}
             role="status"
           >
             {t.message}

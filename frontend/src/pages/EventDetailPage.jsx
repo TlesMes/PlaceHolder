@@ -62,8 +62,8 @@ export default function EventDetailPage() {
   if (eventError) {
     return (
       <Layout>
-        <p className="rounded-xl bg-rose-50 px-5 py-4 text-sm text-rose-600">{eventError}</p>
-        <Link to="/" className="mt-4 inline-block text-sm text-indigo-600 hover:text-indigo-700">
+        <p className="rounded-xl bg-danger-soft px-5 py-4 text-sm text-danger-soft-fg">{eventError}</p>
+        <Link to="/" className="mt-4 inline-block text-sm text-primary hover:text-primary-hover">
           ← 목록으로
         </Link>
       </Layout>
@@ -74,7 +74,7 @@ export default function EventDetailPage() {
     <Layout>
       <Link
         to="/"
-        className="mb-4 inline-flex items-center text-sm text-slate-500 hover:text-slate-700"
+        className="mb-4 inline-flex items-center text-sm text-fg-muted hover:text-fg"
       >
         ← 목록으로
       </Link>
@@ -84,8 +84,8 @@ export default function EventDetailPage() {
       ) : (
         <>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">{event.title}</h1>
-            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-500">
+            <h1 className="text-2xl font-bold tracking-tight text-fg">{event.title}</h1>
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-fg-muted">
               <span className="flex items-center gap-1.5">
                 <span aria-hidden>📍</span>
                 {event.venue}
@@ -97,14 +97,14 @@ export default function EventDetailPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-slate-900">좌석 선택</h2>
+              <h2 className="text-base font-semibold text-fg">좌석 선택</h2>
               <StatusLegend />
             </div>
 
             {!isBooker && (
-              <p className="mb-4 rounded-lg bg-slate-50 px-4 py-2.5 text-sm text-slate-500">
+              <p className="mb-4 rounded-lg bg-surface-muted px-4 py-2.5 text-sm text-fg-muted">
                 좌석 홀드·예약은 BOOKER 계정만 가능합니다. 좌석 현황은 실시간으로 갱신됩니다.
               </p>
             )}
@@ -112,7 +112,7 @@ export default function EventDetailPage() {
             {seatsLoading ? (
               <Spinner className="py-16" />
             ) : seats.length === 0 ? (
-              <div className="py-16 text-center text-sm text-slate-400">좌석이 없습니다.</div>
+              <div className="py-16 text-center text-sm text-fg-subtle">좌석이 없습니다.</div>
             ) : (
               <SeatGrid
                 seats={seats}
@@ -129,15 +129,15 @@ export default function EventDetailPage() {
       {/* 액션바: 좌석을 선택하면 홀드→결제 진행 버튼 노출 */}
       {isBooker && selectedSeat && (
         <div className="sticky bottom-4 mt-6">
-          <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-lg">
+          <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-5 py-4 shadow-lg">
             <div className="text-sm">
-              <span className="font-semibold text-slate-900">{selectedSeat.label}</span>
-              <span className="text-slate-500"> · {formatPrice(selectedSeat.price)} 선택됨</span>
+              <span className="font-semibold text-fg">{selectedSeat.label}</span>
+              <span className="text-fg-muted"> · {formatPrice(selectedSeat.price)} 선택됨</span>
             </div>
             <button
               onClick={handleHold}
               disabled={busy}
-              className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
+              className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover disabled:opacity-60"
             >
               {busy ? '처리 중…' : '홀드하고 결제하기'}
             </button>

@@ -2,13 +2,68 @@
 @tailwind components;
 @tailwind utilities;
 
+/* === 의미 기반 색상 토큰 (공백 구분 RGB 채널, Tailwind <alpha-value> 호환) === */
+:root {
+  /* 표면 / 텍스트 / 테두리 — 라이트 */
+  --base: 248 250 252; /* slate-50 */
+  --surface: 255 255 255; /* white */
+  --surface-muted: 248 250 252; /* slate-50 */
+  --border: 226 232 240; /* slate-200 */
+  --fg: 15 23 42; /* slate-900 */
+  --fg-muted: 100 116 139; /* slate-500 */
+  --fg-subtle: 148 163 184; /* slate-400 */
+  /* 브랜드 */
+  --primary: 79 70 229; /* indigo-600 */
+  --primary-hover: 67 56 202; /* indigo-700 */
+  --primary-soft: 238 242 255; /* indigo-50 */
+  --primary-soft-fg: 79 70 229; /* indigo-600 */
+  /* 상태색 */
+  --success: 5 150 105; /* emerald-600 */
+  --success-soft: 236 253 245; /* emerald-50 */
+  --success-soft-fg: 4 120 87; /* emerald-700 */
+  --warning: 245 158 11; /* amber-500 */
+  --warning-soft: 255 251 235; /* amber-50 */
+  --warning-soft-fg: 180 83 9; /* amber-700 */
+  --danger: 225 29 72; /* rose-600 */
+  --danger-soft: 255 241 242; /* rose-50 */
+  --danger-soft-fg: 190 18 60; /* rose-700 */
+}
+
+.dark {
+  /* 표면 / 텍스트 / 테두리 — 다크 (깊은 네이비) */
+  --base: 2 6 23; /* slate-950 */
+  --surface: 15 23 42; /* slate-900 */
+  --surface-muted: 30 41 59; /* slate-800 */
+  --border: 51 65 85; /* slate-700 */
+  --fg: 241 245 249; /* slate-100 */
+  --fg-muted: 148 163 184; /* slate-400 */
+  --fg-subtle: 100 116 139; /* slate-500 */
+  /* 브랜드 */
+  --primary: 99 102 241; /* indigo-500 */
+  --primary-hover: 129 140 248; /* indigo-400 */
+  --primary-soft: 30 27 75; /* indigo-950 */
+  --primary-soft-fg: 165 180 252; /* indigo-300 */
+  /* 상태색 */
+  --success: 16 185 129; /* emerald-500 */
+  --success-soft: 2 44 34; /* emerald-950 */
+  --success-soft-fg: 110 231 183; /* emerald-300 */
+  --warning: 251 191 36; /* amber-400 */
+  --warning-soft: 69 26 3; /* amber-950 */
+  --warning-soft-fg: 252 211 77; /* amber-300 */
+  --danger: 244 63 94; /* rose-500 */
+  --danger-soft: 76 5 25; /* rose-950 */
+  --danger-soft-fg: 253 164 175; /* rose-300 */
+}
+
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
-body {
-  margin: 0;
-  background-color: #f8fafc;
+@layer base {
+  body {
+    @apply bg-base text-fg;
+    margin: 0;
+  }
 }
