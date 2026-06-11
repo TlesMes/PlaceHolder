@@ -19,4 +19,10 @@ public interface CouponRepository extends JpaRepository<Coupon, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from Coupon c where c.code = :code")
     Optional<Coupon> findByCodeForUpdate(@Param("code") String code);
+
+    /**
+     * 락 없이 코드로 조회. 부하 setup 재실행 시 이미 존재하는 쿠폰을 멱등하게 반환하는 용도
+     * (생성 경로 전용 — 상환은 동시성 때문에 반드시 findByCodeForUpdate를 쓴다).
+     */
+    Optional<Coupon> findByCode(String code);
 }

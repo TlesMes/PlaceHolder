@@ -143,10 +143,18 @@ com.placeholder
   - ProtectedRoute에 `requiredRole` 추가(역할 보호). **UI/UX 단계 — 모의 데이터 하드코딩**, 객체 형태만 백엔드 DTO와 1:1(API 연결은 다음)
   - 다크/라이트 테마: 의미 기반 색상 토큰(CSS 변수, `darkMode:'class'`) + 토글(localStorage 영속, FOUC 방지). 기존 색 하드코딩 전량 토큰화
 
+- **Phase D-2: hold/confirm knee point 측정** — PR #7 (`feature/loadtest-hold-confirm-knee`, **Draft, 진행 중**)
+  - 목적: 부하(도착률)를 올리며 포화점(knee)과 직전 안정 p99 측정. 절대 RPS 아닌 **곡선 형태**
+  - 쿠폰 생성 API(`POST /api/loadtest/coupons`, `@Profile("loadtest")` 전용): confirm 부하용 booker 잔액 시드 수단. 운영엔 빈 없어 404로 보안 경계 유지(상환 redeem의 짝, CouponAdminService)
+  - k6: `hold.js`/`confirm.js`(open-loop ramping-arrival-rate, 성공/거절/에러 분리 집계, `*_error`에 abortOnFail), setup `seedForSeatLoad`/`seedForConfirmLoad`(좌석 풀+잔액+사전hold)
+  - ⚠️ **1차 측정에서 드러난 것(재개 시 반드시 반영):** 이 시스템은 포화 시 5xx가 아니라 **4xx 거절+dropped_iterations로 버팀** → 5xx 기준 abort가 hold에선 미발동. 또 hold 좌석소비로 2만 좌석에도 거절 75%(풀<부하면 "재고소진" 측정됨)
+  - **재개 시 결정(미완):** abort/knee 기준을 성공 지연 p99로 바꿀지 vs 거절 없게 재설계할지 → 정하고 재측정. **confirm.js는 아직 미실행.** 상세는 `loadtest/HANDOFF-D2.md`
+  - 측정 환경: MySQL 8.0 Docker, 앱 `local,loadtest` 프로파일. 수치 해석·knee 판단은 인간 몫
+
 ### 현재 상태
-- **작업 브랜치:** `feature/e3-frontend-ui` (PR #9 리뷰 대기)
-- **마지막 main 커밋:** `docs: 마스터 플랜에서 기간 표기 제거` (69ccc0a)
-  - PR #1~6, #8 머지 완료. #5(쿠폰)·#9(프론트/테마)는 리뷰 대기
+- **작업 브랜치:** feature/loadtest-hold-confirm-knee (origin push 완료, Draft PR #7). main 동기화 완료(PR #9 머지분 반영)
+- **마지막 main 커밋:** `Merge pull request #9 ...` (d7502a6)
+  - PR #1~6, #8, #9 머지 완료. D-2(#7)는 진행 중(미머지, Draft)
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -157,12 +165,13 @@ com.placeholder
   - **GET /api/reservations/my** - 내 예약 내역 (BOOKER) ★ E-3
   - **GET /api/points/history** - 포인트 이력 cursor 페이징 (BOOKER/PROVIDER) ★ E-3
   - **GET /api/providers/my/settlement** - 정산 잔액 + SETTLE 거래 목록 (PROVIDER) ★ E-3
+  - POST /api/loadtest/coupons - 쿠폰 생성 (**loadtest 프로파일 전용**, 운영 404)
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **E-3 프론트엔드 API 연결**: PR #9의 모의 데이터를 실제 API로 교체(`api/` 모듈, cursor 페이징 실동작, 기간/타입 필터 서버 반영)
-2. **E-3 테스트 PR**: MyReservationsServiceTest / PointHistoryServiceTest / ProviderSettlementServiceTest. Docker 가능 환경에서 별도 진행
-3. **Phase D-2**: hold/confirm knee point 측정 (별도 브랜치 `feature/loadtest-hold-confirm-knee`, draft PR #7 재개). 1차 측정 결과 5xx 0 → abort/knee 기준 재정의 결정 대기 중. 인수인계: `loadtest/HANDOFF-D2.md`
+1. **Phase D-2 재개 (진행 중, PR #7):** abort/knee 기준 재정의(1차 측정 결과 5xx 아닌 4xx로 포화) → hold 재측정 → confirm.js 첫 측정. 재개 절차·결정사항은 `loadtest/HANDOFF-D2.md`. 수치 해석·판단은 인간 몫
+2. **E-3 프론트엔드 API 연결**: PR #9의 모의 데이터를 실제 API로 교체(`api/` 모듈, cursor 페이징 실동작, 기간/타입 필터 서버 반영)
+3. **E-3 테스트 PR**: MyReservationsServiceTest / PointHistoryServiceTest / ProviderSettlementServiceTest. Docker 가능 환경에서 별도 진행
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
