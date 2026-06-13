@@ -1,41 +1,46 @@
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { getMySettlement } from '../api/providers';
+import { toMessage } from '../lib/errors';
 import { formatDateTime, formatPoint } from '../lib/format';
 import Layout from '../components/Layout';
-
-// === 모의 데이터 (SettlementResponse 형태와 1:1) ===
-// 실제 API 연결은 다음 단계. cursor 페이징은 사업자 API 강화 PR 머지 후 연결.
-const MOCK_SETTLEMENT = {
-  settlementBalance: 285000,
-  settlements: [
-    {
-      transactionId: 7001,
-      amount: 45000,
-      reservationId: 1001,
-      eventTitle: '재즈 나이트 라이브',
-      seatLabel: 'A-12',
-      confirmedAt: '2026-06-09T14:32:10',
-    },
-    {
-      transactionId: 7002,
-      amount: 60000,
-      reservationId: 1002,
-      eventTitle: '인디 록 페스티벌',
-      seatLabel: 'C-07',
-      confirmedAt: '2026-06-05T09:11:42',
-    },
-    {
-      transactionId: 7003,
-      amount: 180000,
-      reservationId: 1003,
-      eventTitle: '클래식 갈라 콘서트',
-      seatLabel: 'VIP-03',
-      confirmedAt: '2026-05-28T19:05:00',
-    },
-  ],
-};
+import Spinner from '../components/Spinner';
 
 export default function SettlementPage() {
-  const { settlementBalance, settlements } = MOCK_SETTLEMENT;
+  const [settlementBalance, setSettlementBalance] = useState(0);
+  const [settlements, setSettlements] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    getMySettlement()
+      .then((res) => {
+        if (!alive) return;
+        setSettlementBalance(res.data.settlementBalance);
+        setSettlements(res.data.settlements);
+      })
+      .catch((err) => alive && setError(toMessage(err, '정산 정보를 불러오지 못했습니다.')))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <Layout>
+        <Spinner className="py-20" />
+      </Layout>
+    );
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <p className="rounded-xl bg-danger-soft px-5 py-4 text-sm text-danger-soft-fg">{error}</p>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -79,12 +84,8 @@ export default function SettlementPage() {
                 <tr key={s.transactionId} className="transition hover:bg-surface-muted">
                   <td className="px-5 py-4 text-fg-muted">{formatDateTime(s.confirmedAt)}</td>
                   <td className="px-5 py-4">
-                    <Link
-                      to={`/events/${s.reservationId}`}
-                      className="font-medium text-fg transition hover:text-primary"
-                    >
-                      {s.eventTitle}
-                    </Link>
+                    {/* SettlementItem DTO에 eventId가 없어 이벤트 상세로 연결 불가 → 텍스트 표기 */}
+                    <span className="font-medium text-fg">{s.eventTitle}</span>
                   </td>
                   <td className="px-5 py-4">
                     <span className="rounded-full bg-surface-muted px-2.5 py-1 text-xs font-medium text-fg-muted">
