@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.10 기준)
+## 현재 진행 상황 (2026.06.14 기준)
 
 > 완료 항목은 "무엇을/왜"만 요약. 구현 디테일·근거는 해당 ADR / PR에서 확인.
 
@@ -121,7 +121,7 @@ com.placeholder
   - **C-3 자동 만료(스케줄러):** 후보 ID 무락 조회 → 행별 재잠금 → 만료 재확인 → release (TOCTOU 방어). lazy 만료를 안전망으로 병행(ADR-009)
   - **C-4 정합성 테스트:** 만료 vs confirm/hold 경쟁 5종으로 위반 부재 증명
 
-- **포인트 충전 (쿠폰 상환)** — PR #5 (`feature/coupon-redeem`, 리뷰 대기)
+- **포인트 충전 (쿠폰 상환)** — PR #5 (머지 완료)
   - 목적: confirm 측정에 필요한 booker 잔액 확보. 무제한 대신 쿠폰 상환으로 진입 제한
   - 비관적 락 + (coupon_id,user_id) 유니크. `POST /api/points/redeem`. ADR-010(비관적 락 채택 근거)
 
@@ -137,16 +137,22 @@ com.placeholder
   - 인덱스 추가 없이 기존 단일 `idx_pt_user_id` 유지(도메인상 사용자당 거래 소량). ADR-012
   - 서비스 단위 테스트는 별도 PR(Docker 환경)로 분리
 
-- **Phase E-3: 프론트엔드 + 테마** — PR #9 (`feature/e3-frontend-ui`, 리뷰 대기)
+- **Phase E-3: 프론트엔드 + 테마** — PR #9 (머지 완료)
   - 마이페이지(`/me`, BOOKER): 예약 내역 + 포인트 이력(타입별 색·기간/타입 필터·"더 보기" 시안) 탭 전환
   - 정산 대시보드(`/provider/settlement`, PROVIDER): 잔액 카드 + SETTLE 테이블
-  - ProtectedRoute에 `requiredRole` 추가(역할 보호). **UI/UX 단계 — 모의 데이터 하드코딩**, 객체 형태만 백엔드 DTO와 1:1(API 연결은 다음)
+  - ProtectedRoute에 `requiredRole` 추가(역할 보호). UI/UX 단계 — 모의 데이터 하드코딩(API 연결은 PR #10)
   - 다크/라이트 테마: 의미 기반 색상 토큰(CSS 변수, `darkMode:'class'`) + 토글(localStorage 영속, FOUC 방지). 기존 색 하드코딩 전량 토큰화
 
+- **Phase E-3: 프론트 API 연결** — PR #10 (`feature/e3-frontend-api`, 리뷰 대기)
+  - PR #9의 모의 데이터(MOCK_*)를 실제 조회 API 3종으로 교체. api 모듈 추가(reservations/points/providers)
+  - 포인트 이력: 기간(1/3/6개월)은 `from` 서버 반영, cursor 페이징("더 보기") 실동작. **타입 필터는 클라이언트 처리**(서버 미지원, ADR-012 거래량 적음 전제)
+  - SettlementPage 링크 버그 수정(reservationId를 eventId로 오용 → eventId 부재로 텍스트화)
+  - **정산 조회 무페이징 한계 백로그**: `/providers/my/settlement`가 SETTLE 전건 반환 → PROVIDER는 좌석 판매량 비례 증가라 ADR-012 "거래량 적음" 가정이 약함. 측정 후 cursor 페이징 검토(`docs/performance/settlement-query-scalability.md`)
+
 ### 현재 상태
-- **작업 브랜치:** `feature/e3-frontend-ui` (PR #9 리뷰 대기)
-- **마지막 main 커밋:** `docs: 마스터 플랜에서 기간 표기 제거` (69ccc0a)
-  - PR #1~6, #8 머지 완료. #5(쿠폰)·#9(프론트/테마)는 리뷰 대기
+- **작업 브랜치:** `feature/e3-frontend-api` (PR #10 리뷰 대기)
+- **마지막 main 커밋:** `docs: 정산 조회 무페이징 한계 백로그 기록` (e9d819a)
+  - PR #1~6, #8, #5, #9 머지 완료. #10(프론트 API 연결)·#7(D-2 draft)은 진행 중
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -160,9 +166,9 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **E-3 프론트엔드 API 연결**: PR #9의 모의 데이터를 실제 API로 교체(`api/` 모듈, cursor 페이징 실동작, 기간/타입 필터 서버 반영)
-2. **E-3 테스트 PR**: MyReservationsServiceTest / PointHistoryServiceTest / ProviderSettlementServiceTest. Docker 가능 환경에서 별도 진행
-3. **Phase D-2**: hold/confirm knee point 측정 (별도 브랜치 `feature/loadtest-hold-confirm-knee`, draft PR #7 재개). 1차 측정 결과 5xx 0 → abort/knee 기준 재정의 결정 대기 중. 인수인계: `loadtest/HANDOFF-D2.md`
+1. **E-3 테스트 PR**: MyReservationsServiceTest / PointHistoryServiceTest / ProviderSettlementServiceTest. Docker 가능 환경에서 별도 진행
+2. **Phase D-2**: hold/confirm knee point 측정 (별도 브랜치 `feature/loadtest-hold-confirm-knee`, draft PR #7 재개). 1차 측정 결과 5xx 0 → abort/knee 기준 재정의 결정 대기 중. 인수인계: `loadtest/HANDOFF-D2.md`
+3. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가에 따른 응답 곡선 측정 후 도입 판단
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
@@ -187,7 +193,7 @@ com.placeholder
   ├── security/ (CustomUserDetails(Service), JwtAuthenticationEntryPoint)
   └── config/ (SecurityConfig, WebConfig - CORS)
   ```
-- **프론트엔드 구조:** `frontend/src/` — pages(Login/Signup/EventList/EventDetail/Checkout/MyPage/Settlement), components(SeatGrid/SeatCell/Header/Layout/ThemeToggle 등), context(Auth/Toast/Theme), hooks(useSeatPolling), lib(jwt/errors/format/seatStyle/theme), api(client/auth/events/seats). 폴링은 useSeatPolling 훅 경계로 분리(추후 SSE 교체점).
+- **프론트엔드 구조:** `frontend/src/` — pages(Login/Signup/EventList/EventDetail/Checkout/MyPage/Settlement), components(SeatGrid/SeatCell/Header/Layout/ThemeToggle 등), context(Auth/Toast/Theme), hooks(useSeatPolling), lib(jwt/errors/format/seatStyle/theme), api(client/auth/events/seats/reservations/points/providers). 폴링은 useSeatPolling 훅 경계로 분리(추후 SSE 교체점).
   - **색상 토큰:** 색은 의미 기반 토큰(`bg-surface`/`text-fg`/`primary`/`success` 등)으로만 사용. 팔레트 색(slate/indigo…) 직접 하드코딩 금지. 토큰 값은 `index.css`의 `:root`/`.dark` CSS 변수, 정의는 `tailwind.config.js`.
 
 ---
