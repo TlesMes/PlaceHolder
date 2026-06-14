@@ -22,9 +22,9 @@ const TYPE_FILTERS = [
 
 // 거래 타입별 색상/부호 표현
 const TYPE_META = {
-  CHARGE: { label: '충전', text: 'text-success', badge: 'bg-success-soft text-success-soft-fg' },
-  DEDUCT: { label: '사용', text: 'text-danger', badge: 'bg-danger-soft text-danger-soft-fg' },
-  SETTLE: { label: '정산', text: 'text-primary', badge: 'bg-primary-soft text-primary-soft-fg' },
+  CHARGE: { label: '충전', sign: '+', text: 'text-success', badge: 'bg-success-soft text-success-soft-fg' },
+  DEDUCT: { label: '사용', sign: '-', text: 'text-danger', badge: 'bg-danger-soft text-danger-soft-fg' },
+  SETTLE: { label: '정산', sign: '+', text: 'text-primary', badge: 'bg-primary-soft text-primary-soft-fg' },
 };
 
 const TABS = [
@@ -265,7 +265,7 @@ function PointsTab() {
                     </div>
                   </div>
                   <span className={`text-sm font-semibold ${meta.text}`}>
-                    {it.amount > 0 ? '+' : ''}
+                    {meta.sign}
                     {formatPoint(it.amount)}
                   </span>
                 </div>
