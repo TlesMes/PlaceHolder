@@ -143,16 +143,18 @@ com.placeholder
   - ProtectedRoute에 `requiredRole` 추가(역할 보호). UI/UX 단계 — 모의 데이터 하드코딩(API 연결은 PR #10)
   - 다크/라이트 테마: 의미 기반 색상 토큰(CSS 변수, `darkMode:'class'`) + 토글(localStorage 영속, FOUC 방지). 기존 색 하드코딩 전량 토큰화
 
-- **Phase E-3: 프론트 API 연결** — PR #10 (`feature/e3-frontend-api`, 리뷰 대기)
+- **Phase E-3: 프론트 API 연결** — PR #10 (머지 완료)
   - PR #9의 모의 데이터(MOCK_*)를 실제 조회 API 3종으로 교체. api 모듈 추가(reservations/points/providers)
   - 포인트 이력: 기간(1/3/6개월)은 `from` 서버 반영, cursor 페이징("더 보기") 실동작. **타입 필터는 클라이언트 처리**(서버 미지원, ADR-012 거래량 적음 전제)
   - SettlementPage 링크 버그 수정(reservationId를 eventId로 오용 → eventId 부재로 텍스트화)
+  - **부호 표시 버그 수정**: `amount`는 타입 무관 양수 크기 저장(방향은 `type`) → 부호를 `TYPE_META.sign`에서 도출(사용=−, 충전/정산=+). Chrome 수동 검증으로 발견(`docs/verification/PR10-frontend-api-검증-2026-06-14.md`)
   - **정산 조회 무페이징 한계 백로그**: `/providers/my/settlement`가 SETTLE 전건 반환 → PROVIDER는 좌석 판매량 비례 증가라 ADR-012 "거래량 적음" 가정이 약함. 측정 후 cursor 페이징 검토(`docs/performance/settlement-query-scalability.md`)
 
 ### 현재 상태
-- **작업 브랜치:** `feature/e3-frontend-api` (PR #10 리뷰 대기)
-- **마지막 main 커밋:** `docs: 정산 조회 무페이징 한계 백로그 기록` (e9d819a)
-  - PR #1~6, #8, #5, #9 머지 완료. #10(프론트 API 연결)·#7(D-2 draft)은 진행 중
+- **작업 브랜치:** `main` (다음 작업용 신규 브랜치 필요)
+- **마지막 main 커밋:** `Merge pull request #10` (c22f627)
+  - PR #1~6, #8, #5, #9, #10 머지 완료. #7(D-2 draft)만 진행 중
+  - E-3(조회 API + 프론트 연결 + 부호 버그 수정)까지 완료 → 마이페이지·정산 대시보드 실데이터 동작 검증됨
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
