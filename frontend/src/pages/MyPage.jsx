@@ -1,65 +1,11 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { formatDateTime, formatPoint } from '../lib/format';
+import { getMyReservations } from '../api/reservations';
+import { getPointHistory } from '../api/points';
+import { toMessage } from '../lib/errors';
+import { formatDateTime, formatPoint, monthsAgoLocalDateTime } from '../lib/format';
 import Layout from '../components/Layout';
-
-// === 모의 데이터 (백엔드 응답 DTO 형태와 1:1) ===
-// 실제 API 연결은 다음 단계. 형태는 MyReservationsResponse / PointHistoryResponse 그대로.
-const MOCK_RESERVATIONS = [
-  {
-    reservationId: 1001,
-    eventId: 1,
-    eventTitle: '재즈 나이트 라이브',
-    eventVenue: '블루노트 서울',
-    eventAt: '2026-07-12T20:00:00',
-    seatId: 42,
-    seatLabel: 'A-12',
-    paidAmount: 45000,
-    confirmedAt: '2026-06-09T14:32:10',
-  },
-  {
-    reservationId: 1002,
-    eventId: 2,
-    eventTitle: '인디 록 페스티벌',
-    eventVenue: '올림픽홀',
-    eventAt: '2026-08-03T18:30:00',
-    seatId: 88,
-    seatLabel: 'C-07',
-    paidAmount: 60000,
-    confirmedAt: '2026-06-05T09:11:42',
-  },
-];
-
-const MOCK_POINT_HISTORY = {
-  items: [
-    {
-      transactionId: 5001,
-      type: 'CHARGE',
-      amount: 100000,
-      reservationId: null,
-      eventTitle: null,
-      createdAt: '2026-06-04T10:00:00',
-    },
-    {
-      transactionId: 5002,
-      type: 'DEDUCT',
-      amount: -45000,
-      reservationId: 1001,
-      eventTitle: '재즈 나이트 라이브',
-      createdAt: '2026-06-09T14:32:10',
-    },
-    {
-      transactionId: 5003,
-      type: 'DEDUCT',
-      amount: -60000,
-      reservationId: 1002,
-      eventTitle: '인디 록 페스티벌',
-      createdAt: '2026-06-05T09:11:42',
-    },
-  ],
-  // 다음 cursor 페이지가 있다는 시안. 실제 호출은 다음 단계.
-  nextCursor: '2026-06-05T09:11:42',
-};
+import Spinner from '../components/Spinner';
 
 const PERIOD_PRESETS = [
   { value: 1, label: '1개월' },
@@ -76,9 +22,9 @@ const TYPE_FILTERS = [
 
 // 거래 타입별 색상/부호 표현
 const TYPE_META = {
-  CHARGE: { label: '충전', text: 'text-success', badge: 'bg-success-soft text-success-soft-fg' },
-  DEDUCT: { label: '사용', text: 'text-danger', badge: 'bg-danger-soft text-danger-soft-fg' },
-  SETTLE: { label: '정산', text: 'text-primary', badge: 'bg-primary-soft text-primary-soft-fg' },
+  CHARGE: { label: '충전', sign: '+', text: 'text-success', badge: 'bg-success-soft text-success-soft-fg' },
+  DEDUCT: { label: '사용', sign: '-', text: 'text-danger', badge: 'bg-danger-soft text-danger-soft-fg' },
+  SETTLE: { label: '정산', sign: '+', text: 'text-primary', badge: 'bg-primary-soft text-primary-soft-fg' },
 };
 
 const TABS = [
@@ -88,14 +34,6 @@ const TABS = [
 
 export default function MyPage() {
   const [tab, setTab] = useState('reservations');
-  const [period, setPeriod] = useState(3);
-  const [typeFilter, setTypeFilter] = useState('ALL');
-
-  // 모의 클라이언트 필터 (시안용). 실제 서버 필터는 다음 단계.
-  const visibleItems =
-    typeFilter === 'ALL'
-      ? MOCK_POINT_HISTORY.items
-      : MOCK_POINT_HISTORY.items.filter((it) => it.type === typeFilter);
 
   return (
     <Layout>
@@ -121,23 +59,33 @@ export default function MyPage() {
         ))}
       </div>
 
-      {tab === 'reservations' ? (
-        <ReservationsTab reservations={MOCK_RESERVATIONS} />
-      ) : (
-        <PointsTab
-          items={visibleItems}
-          hasMore={MOCK_POINT_HISTORY.nextCursor != null}
-          period={period}
-          onPeriodChange={setPeriod}
-          typeFilter={typeFilter}
-          onTypeFilterChange={setTypeFilter}
-        />
-      )}
+      {tab === 'reservations' ? <ReservationsTab /> : <PointsTab />}
     </Layout>
   );
 }
 
-function ReservationsTab({ reservations }) {
+function ReservationsTab() {
+  const [reservations, setReservations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    getMyReservations()
+      .then((res) => alive && setReservations(res.data.reservations))
+      .catch((err) => alive && setError(toMessage(err, '예약 내역을 불러오지 못했습니다.')))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (loading) return <Spinner className="py-20" />;
+  if (error)
+    return (
+      <p className="rounded-xl bg-danger-soft px-5 py-4 text-sm text-danger-soft-fg">{error}</p>
+    );
+
   if (reservations.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border py-20 text-center text-fg-subtle">
@@ -188,23 +136,76 @@ function ReservationsTab({ reservations }) {
   );
 }
 
-function PointsTab({
-  items,
-  hasMore,
-  period,
-  onPeriodChange,
-  typeFilter,
-  onTypeFilterChange,
-}) {
+function PointsTab() {
+  const [period, setPeriod] = useState(3);
+  const [typeFilter, setTypeFilter] = useState('ALL');
+
+  const [items, setItems] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [loading, setLoading] = useState(true); // 첫 로드 / 기간 변경
+  const [loadingMore, setLoadingMore] = useState(false); // "더 보기"
+  const [error, setError] = useState('');
+
+  // 기간(period)이 바뀌면 from을 새로 계산해 처음부터 다시 조회.
+  // useCallback으로 묶어 "더 보기"는 같은 from·기존 cursor로 이어 부른다.
+  const fetchPage = useCallback(
+    async (cursor) => {
+      const from = monthsAgoLocalDateTime(period);
+      const res = await getPointHistory({ from, cursor });
+      return res.data; // { items, nextCursor }
+    },
+    [period]
+  );
+
+  // 기간 변경(fetchPage 갱신) 시 목록을 처음부터 다시 조회.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const data = await fetchPage(undefined);
+        if (!alive) return;
+        setItems(data.items);
+        setNextCursor(data.nextCursor);
+      } catch (err) {
+        if (alive) setError(toMessage(err, '포인트 이력을 불러오지 못했습니다.'));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [fetchPage]);
+
+  const handleLoadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await fetchPage(nextCursor);
+      setItems((prev) => [...prev, ...data.items]);
+      setNextCursor(data.nextCursor);
+    } catch (err) {
+      setError(toMessage(err, '추가 이력을 불러오지 못했습니다.'));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // 타입 필터는 서버 미지원 → 로드된 목록을 클라이언트에서 거른다 (ADR-012: 사용자당 거래량 적음 전제).
+  const visibleItems =
+    typeFilter === 'ALL' ? items : items.filter((it) => it.type === typeFilter);
+
   return (
     <div>
-      {/* 필터 바: 기간 프리셋 + 거래 타입 (시안 — 동작은 클라이언트 모의) */}
+      {/* 필터 바: 기간 프리셋(서버) + 거래 타입(클라이언트) */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg border border-border p-1">
           {PERIOD_PRESETS.map((p) => (
             <button
               key={p.value}
-              onClick={() => onPeriodChange(p.value)}
+              onClick={() => setPeriod(p.value)}
               className={`rounded-md px-3 py-1 text-xs font-medium transition ${
                 period === p.value
                   ? 'bg-primary text-white'
@@ -219,7 +220,7 @@ function PointsTab({
           {TYPE_FILTERS.map((f) => (
             <button
               key={f.value}
-              onClick={() => onTypeFilterChange(f.value)}
+              onClick={() => setTypeFilter(f.value)}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                 typeFilter === f.value
                   ? 'border-primary bg-primary-soft text-primary-soft-fg'
@@ -232,14 +233,21 @@ function PointsTab({
         </div>
       </div>
 
-      {items.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border py-20 text-center text-fg-subtle">
-          포인트 이력이 없습니다.
-        </div>
+      {loading ? (
+        <Spinner className="py-20" />
+      ) : error ? (
+        <p className="rounded-xl bg-danger-soft px-5 py-4 text-sm text-danger-soft-fg">{error}</p>
       ) : (
         <>
+          {visibleItems.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border py-20 text-center text-fg-subtle">
+              {typeFilter === 'ALL'
+                ? '포인트 이력이 없습니다.'
+                : '해당 유형의 이력이 없습니다. 더 보기로 이전 기록을 확인하세요.'}
+            </div>
+          ) : (
           <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
-            {items.map((it) => {
+            {visibleItems.map((it) => {
               const meta = TYPE_META[it.type] ?? TYPE_META.DEDUCT;
               return (
                 <div key={it.transactionId} className="flex items-center justify-between px-5 py-4">
@@ -257,23 +265,24 @@ function PointsTab({
                     </div>
                   </div>
                   <span className={`text-sm font-semibold ${meta.text}`}>
-                    {it.amount > 0 ? '+' : ''}
+                    {meta.sign}
                     {formatPoint(it.amount)}
                   </span>
                 </div>
               );
             })}
           </div>
+          )}
 
-          {/* 무한 스크롤 UX 시안. 실제 cursor 호출은 다음 단계. */}
+          {/* cursor 페이징: nextCursor가 있으면 다음 페이지를 이어 붙인다. */}
           <div className="mt-5 text-center">
-            {hasMore ? (
+            {nextCursor ? (
               <button
-                disabled
-                title="다음 단계에서 API와 연결됩니다"
-                className="cursor-not-allowed rounded-lg border border-border px-4 py-2 text-sm font-medium text-fg-subtle"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:opacity-60"
               >
-                더 보기
+                {loadingMore ? '불러오는 중…' : '더 보기'}
               </button>
             ) : (
               <p className="text-xs text-fg-subtle">모든 이력을 불러왔습니다.</p>
