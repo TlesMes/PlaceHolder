@@ -1,0 +1,35 @@
+name: CI
+
+# PR을 main으로 보낼 때(검증 게이트) + main에 머지된 뒤(사후 확인) 실행한다.
+# 푸시 자체를 막지는 않는다 — 이 워크플로의 성공/실패가 PR 머지를 게이트한다
+# (GitHub의 branch protection rule에서 이 체크를 required로 지정해야 머지 차단이 걸린다).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # JDK 17(Temurin) + Maven 로컬 저장소 캐시(~/.m2). 프로젝트는 Java 17 고정.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # Windows에서 커밋된 래퍼라 Linux 러너에서 실행 비트가 없을 수 있어 보강.
+      - name: Make mvnw executable
+        run: chmod +x ./mvnw
+
+      # 통합 테스트는 Testcontainers MySQL을 자체 기동한다(@ServiceConnection).
+      # ubuntu-latest 러너는 Docker 데몬이 기본 실행 중이라 별도 service 컨테이너가 필요 없다.
+      # (pom surefire의 api.version=1.44는 신버전 Docker 대응 설정 — 러너 Docker에서도 안전.)
+      - name: Build & test
+        run: ./mvnw -B clean verify
