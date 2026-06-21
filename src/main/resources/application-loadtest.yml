@@ -6,6 +6,12 @@
 spring:
   # datasource 자격증명은 application.yml과 동일하게 환경변수(${DB_USERNAME}/${DB_PASSWORD}) 사용.
   # 평문 비밀번호를 커밋하지 않기 위해 여기서 재정의하지 않는다.
+  datasource:
+    hikari:
+      # 커넥션 풀 크기를 명시 고정. 미설정 시 HikariCP 기본값도 10이지만,
+      # D-2 측정의 knee는 "풀 크기의 함수"이므로 측정 조건을 문서로 박아 재현·비교 가능하게 한다.
+      # (1차 측정도 기본 10에서 수행 → 동일 조건. 풀을 키워 knee 이동을 보는 건 후속 실험.)
+      maximum-pool-size: 10
   jpa:
     show-sql: false   # 통계만으로 충분 — SQL 폭주 로그는 끔
     properties:
@@ -15,3 +21,4 @@ spring:
 logging:
   level:
     org.hibernate.stat: DEBUG   # Session Metrics(쿼리 수) 출력
+    com.zaxxer.hikari: DEBUG    # 커넥션 풀 대기/고갈 로깅 — 5xx 발생 시 원인(풀 고갈 vs 락 타임아웃) 구분
