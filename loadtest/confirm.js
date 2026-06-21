@@ -4,6 +4,9 @@
 //       좌석 + BookerAccount 두 행을 잠그는 다중 락 + 포인트 차감 트랜잭션.
 //       도착률을 ramp하며 달성 처리량 천장과 p99 knee를 관찰한다.
 //
+// ★ 포화/abort 기준 = 성공 지연 p99 (A안, hold.js와 동일). confirm은 hold보다 무거워
+//   천장이 더 낮으므로 ramp를 더 보수적으로(30~300/s) 잡는다.
+//
 // ★ confirm 격리 측정. setup이 좌석을 미리 HELD로 만들어 두고, 부하 구간에선 confirm만 호출한다.
 //   hold 비용이 안 섞여 confirm 트랜잭션 자체의 비용을 깨끗이 본다.
 //   (락 정합성은 JUnit 동시성 테스트가 이미 증명 — 부하 테스트는 곡선만 본다.)
@@ -19,7 +22,8 @@
 //   - 에러(5xx/타임아웃): 진짜 포화(lock wait timeout, 커넥션 고갈)
 //
 // 실행 (좌석 풀을 충분히 — confirm 총량보다 크게):
-//   k6 run -e EVENT_COUNT=200 -e START_RATE=50 -e MAX_RATE=400 loadtest/confirm.js
+//   k6 run -e EVENT_COUNT=200 loadtest/confirm.js
+//   k6 run -e EVENT_COUNT=200 -e P99_ABORT_MS=1000 loadtest/confirm.js   (p99 임계 조정)
 
 import http from 'k6/http';
 import { check } from 'k6';
@@ -35,33 +39,36 @@ const confirmRejected = new Counter('confirm_rejected');
 const confirmError = new Counter('confirm_error');
 const seatExhausted = new Counter('seat_exhausted');   // 미리 hold한 좌석을 다 써버린 횟수
 
-const START_RATE = parseInt(__ENV.START_RATE || '50');
-// 상한은 높게 — 고정 상한을 낮게 박으면 안 꺾인 채 통과해 knee를 놓친다. 실제 종료는 abortOnFail.
-// 단 confirm은 좌석을 1회 소비하므로 상한이 높을수록 사전 hold할 좌석 풀(EVENT_COUNT)도 커야 한다.
-const MAX_RATE = parseInt(__ENV.MAX_RATE || '3000');
+// 성공 지연 p99 abort 임계(ms). 성공 p99가 넘으면 knee로 보고 중단. env로 조정.
+const P99_ABORT_MS = parseInt(__ENV.P99_ABORT_MS || '2000');
 const STAGE_DURATION = __ENV.STAGE_DURATION || '30s';
 
 export const options = {
   scenarios: {
     confirm_ramp: {
       executor: 'ramping-arrival-rate',
-      startRate: START_RATE,
+      startRate: 30,                // confirm은 무거워 hold보다 낮게 출발
       timeUnit: '1s',
-      // 올리기만 한다(open-loop). 에러가 나면 abortOnFail이 중단하므로 보통 상한 전에 멈춘다.
+      // 30~300/s를 촘촘히 올린다(open-loop). 성공 p99가 임계를 넘으면 abortOnFail이 멈춘다.
+      // confirm은 좌석을 1회 소비하므로 상단이 높을수록 사전 hold 좌석 풀(EVENT_COUNT)도 커야 한다.
       stages: [
-        { target: START_RATE, duration: STAGE_DURATION },
-        { target: Math.round(MAX_RATE * 0.1), duration: STAGE_DURATION },
-        { target: Math.round(MAX_RATE * 0.25), duration: STAGE_DURATION },
-        { target: Math.round(MAX_RATE * 0.5), duration: STAGE_DURATION },
-        { target: Math.round(MAX_RATE * 0.75), duration: STAGE_DURATION },
-        { target: MAX_RATE, duration: STAGE_DURATION },
+        { target: 30,  duration: STAGE_DURATION },
+        { target: 60,  duration: STAGE_DURATION },
+        { target: 100, duration: STAGE_DURATION },
+        { target: 150, duration: STAGE_DURATION },
+        { target: 200, duration: STAGE_DURATION },
+        { target: 250, duration: STAGE_DURATION },
+        { target: 300, duration: STAGE_DURATION },
       ],
       preAllocatedVUs: 200,
       maxVUs: 3000,
     },
   },
   thresholds: {
-    // ★ 에러(5xx/타임아웃) 발생 = 한계 도달 → 자동 중단. "안 터지고 통과" 방지.
+    // ★ 주 기준(A): 성공 지연 p99가 임계 초과 = knee 도달 → 자동 중단.
+    //   confirm_duration은 성공(200)에만 add하므로 "성공 지연 p99"가 정확히 집계된다.
+    'confirm_duration': [{ threshold: `p(99)<${P99_ABORT_MS}`, abortOnFail: true, delayAbortEval: '10s' }],
+    // 보조: 5xx/타임아웃은 진짜 실패 → 즉시 중단.
     'confirm_error': [{ threshold: 'count<1', abortOnFail: true }],
     // seat_exhausted는 abort하지 않는다. 좌석 고갈은 시스템 한계가 아니라 시드 부족 —
     // 중단이 아니라 EVENT_COUNT를 키워 재측정해야 할 신호다(0이어야 측정 유효).

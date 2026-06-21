@@ -5,6 +5,14 @@
 //
 // 측정 초점은 절대 RPS(하드웨어 종속)가 아니라 곡선의 형태다.
 //
+// ★ 포화/abort 기준 = 성공 지연 p99 (A안). 1차 측정에서 이 시스템은 5xx로 죽지 않고
+//   4xx 거절 + dropped_iterations로 버텨, 5xx 기준 abort가 hold 경로엔 발동하지 않았다.
+//   대신 성공 지연 p99가 임계(P99_ABORT_MS)를 넘는 순간을 knee로 보고 자동 중단한다.
+//   (5xx 안전망은 보조로 유지 — 진짜 장애 시 즉시 중단.)
+//
+// ★ ramp는 1차 측정 천장(~356/s) 근방을 촘촘히 본다(50~600/s). 1차의 50→5000은
+//   knee를 한 칸(50→500)에 건너뛰고 상단은 dropped_iterations 노이즈였다.
+//
 // ★ 모드: 분산(spread). 좌석 풀 전체에 부하를 흩뿌려 같은 행 락 충돌을 최소화한다.
 //   - "락이 동시 출발 시 한 명만 성공하는가" 같은 정합성은 JUnit 동시성 테스트(C-1/C-4)가
 //     이미 증명했다. 부하 테스트는 그걸 재탕하지 않고, 처리량/지연 곡선만 본다.
@@ -19,7 +27,7 @@
 //
 // 실행:
 //   k6 run loadtest/hold.js
-//   k6 run -e START_RATE=100 -e MAX_RATE=800 loadtest/hold.js   (시작/상한 도착률)
+//   k6 run -e P99_ABORT_MS=1000 loadtest/hold.js                (knee 판정 p99 임계 조정)
 //   k6 run -e EVENT_COUNT=400 loadtest/hold.js                  (좌석 풀 키우기 — 소진 방지)
 
 import http from 'k6/http';
@@ -35,37 +43,40 @@ const holdSuccess = new Counter('hold_success');
 const holdRejected = new Counter('hold_rejected');
 const holdError = new Counter('hold_error');
 
-const START_RATE = parseInt(__ENV.START_RATE || '50');
-// 상한은 "절대 안 버틸" 만큼 높게 잡는다. 고정 상한을 낮게 박으면 시스템이 안 꺾인 채
-// 그냥 통과해버려 knee를 놓친다. 실제 종료는 아래 abortOnFail이 결정한다(에러 = 진짜 한계).
-const MAX_RATE = parseInt(__ENV.MAX_RATE || '5000');
+// 성공 지연 p99 abort 임계(ms). 이 값을 성공 p99가 넘으면 knee로 보고 중단. env로 조정.
+const P99_ABORT_MS = parseInt(__ENV.P99_ABORT_MS || '2000');
 const STAGE_DURATION = __ENV.STAGE_DURATION || '30s';
 
 export const options = {
   scenarios: {
     hold_ramp: {
       executor: 'ramping-arrival-rate',
-      startRate: START_RATE,        // 0이 아니라 이 도착률에서 출발 (저부하 구간 스킵)
+      startRate: 50,                // 50/s에서 출발 (저부하 구간 스킵)
       timeUnit: '1s',
-      // 도착률을 계속 끌어올린다. 시스템이 꺾여 에러가 나는 순간 abortOnFail이 멈추므로,
-      // 상한까지 가기 전에 보통 중단된다. 곡선 형태를 보존하려 내리지 않고 올리기만 한다(open-loop).
+      // 천장(~356/s) 근방을 촘촘히 올린다(open-loop, 내리지 않음). 성공 p99가 임계를 넘으면
+      // abortOnFail이 멈추므로 상단(600)까지 가기 전에 보통 중단된다 — 곡선 형태 보존.
       stages: [
-        { target: START_RATE, duration: STAGE_DURATION },
-        { target: Math.round(MAX_RATE * 0.1), duration: STAGE_DURATION },
-        { target: Math.round(MAX_RATE * 0.25), duration: STAGE_DURATION },
-        { target: Math.round(MAX_RATE * 0.5), duration: STAGE_DURATION },
-        { target: Math.round(MAX_RATE * 0.75), duration: STAGE_DURATION },
-        { target: MAX_RATE, duration: STAGE_DURATION },
+        { target: 50,  duration: STAGE_DURATION },
+        { target: 100, duration: STAGE_DURATION },
+        { target: 150, duration: STAGE_DURATION },
+        { target: 200, duration: STAGE_DURATION },
+        { target: 250, duration: STAGE_DURATION },
+        { target: 300, duration: STAGE_DURATION },
+        { target: 400, duration: STAGE_DURATION },
+        { target: 500, duration: STAGE_DURATION },
+        { target: 600, duration: STAGE_DURATION },
       ],
       preAllocatedVUs: 200,
       maxVUs: 3000,
     },
   },
   thresholds: {
-    // ★ 에러(5xx/타임아웃) 발생 = 시스템 한계 도달로 보고 테스트를 자동 중단.
-    //   상한을 높게 잡아도 여기서 멈추므로 "안 터지고 통과"가 불가능하다.
+    // ★ 주 기준(A): 성공 지연 p99가 임계 초과 = knee 도달 → 자동 중단.
+    //   hold_duration은 성공(200)에만 add하므로 "성공 지연 p99"가 정확히 집계된다.
+    //   delayAbortEval로 초기 cold-start 스파이크의 오발동을 방지한다.
+    'hold_duration': [{ threshold: `p(99)<${P99_ABORT_MS}`, abortOnFail: true, delayAbortEval: '10s' }],
+    // 보조: 5xx/타임아웃은 여전히 진짜 실패 → 즉시 중단 (1차엔 0이었지만 안전망 유지).
     //   4xx(이미 점유)는 정상 거절이라 기준에서 제외 — hold_error엔 5xx/timeout만 집계된다.
-    //   (threshold 평가는 주기적이라 첫 에러 후 한 박자 더 부하가 나간 뒤 중단된다 — knee 직전 데이터 보존.)
     'hold_error': [{ threshold: 'count<1', abortOnFail: true }],
   },
 };
