@@ -157,18 +157,17 @@ com.placeholder
     - `ProviderSettlementServiceTest`(5): 잔액+매핑·SETTLE만·빈 목록·계정 없음(UserNotFoundException)·provider 격리
   - **타임스탬프 정밀도 함정:** `created_at`/`confirmed_at`은 `@PrePersist now()` 고정 → cursor/정렬 경계를 결정론적으로 만들려면 저장 후 `JdbcTemplate`으로 덮어씀. 단일 값을 저장값+cursor 파라미터로 동시에 쓰는 경계 테스트는 `truncatedTo(SECONDS)`로 datetime(6) round-trip 일치 보장(self-invocation `@Transactional`은 프록시 미경유라 무효, repository.save 자체 트랜잭션에만 의존)
 
-- **Phase D-2: hold/confirm knee point 측정** — PR #7 (`feature/loadtest-hold-confirm-knee`, **Draft, 진행 중**)
-  - 목적: 부하(도착률)를 올리며 포화점(knee)과 직전 안정 p99 측정. 절대 RPS 아닌 **곡선 형태**
-  - 쿠폰 생성 API(`POST /api/loadtest/coupons`, `@Profile("loadtest")` 전용): confirm 부하용 booker 잔액 시드 수단. 운영엔 빈 없어 404로 보안 경계 유지(상환 redeem의 짝, CouponAdminService)
-  - k6: `hold.js`/`confirm.js`(open-loop ramping-arrival-rate, 성공/거절/에러 분리 집계), setup `seedForSeatLoad`/`seedForConfirmLoad`(좌석 풀+잔액+사전hold)
-  - ⚠️ **1차 측정에서 드러난 것:** 이 시스템은 포화 시 5xx가 아니라 **4xx 거절+dropped_iterations로 버팀** → 5xx 기준 abort가 hold에선 미발동. 또 hold 좌석소비로 2만 좌석에도 거절 75%(풀<부하면 "재고소진" 측정됨). 달성 천장 ~356/s
-  - **재개 결정(확정):** abort/knee 기준을 **성공 지연 p99 임계 초과**로 변경(5xx 대신) + ramp를 천장 근방(50~600/s)으로 재스케일 + HikariCP 풀 10 명시 고정. confirm.js 첫 측정. 상세 `loadtest/HANDOFF-D2.md`
-  - 측정 환경: MySQL 8.0 Docker, 앱 `local,loadtest` 프로파일. 수치 해석·knee 판단은 인간 몫
+- **Phase D-2: hold knee point 측정** — PR #7 (`feature/loadtest-hold-confirm-knee`, **측정 종료**)
+  - 방법: open-loop `ramping-arrival-rate`로 도착률을 올리며 **성공 지연 p99 임계 초과**를 knee로 abort(A안). 좌석 7.5만(재고 소진 방지) + 풀 크기 `HIKARI_POOL` env 가변
+  - **풀 스윕 5/10/20 결과(이 박스 기준):** knee가 5→10 2.2배(풀-바운드) → 10→20 1.06배(플래토). 풀 5는 CPU 65%인데 꺾임=커넥션 부족. → **병목은 커넥션 풀이 아니라 ~풀10에서 박스 CPU**(단일 박스 app+MySQL+k6 공유, ~880/s). 적정 풀 ≈ 10(기본값), **튜닝 불필요**
+  - **결론:** 시스템은 5xx 없이 **지연으로 graceful degrade** → 대기열(E-1)은 크래시 방지 아니라 **지연 SLO 보호**용. ⚠️ 분산 설계라 측정한 건 **인프라 처리량**이지 "경합 하 락 설계"가 아님(경합 정확성은 C-4가 증명). **confirm 미실행**(동일 양상 예상). 상세·정직한 한계: `loadtest/HANDOFF-D2.md`
+  - 부산물: 측정이 가설을 3회 교정(풀=병목→아니다→10미만에선 맞다). **실질 perf 성과는 D-1(N+1)**, D-2는 보조 결론
+  - 쿠폰 생성 API(`POST /api/loadtest/coupons`, `@Profile("loadtest")` 전용): 운영엔 빈 없어 404
 
 ### 현재 상태
 - **작업 브랜치:** `feature/loadtest-hold-confirm-knee` (Draft PR #7, main 동기화 완료 — PR #10·#11 반영)
 - **마지막 main 커밋:** `Merge pull request #11` (56480d5)
-  - PR #1~6, #8, #5, #9, #10, #11 머지 완료. #7(D-2 draft)만 진행 중
+  - PR #1~6, #8, #5, #9, #10, #11 머지 완료. #7(D-2)은 측정 종료 → 정식 PR 전환 대기
   - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종)까지 완료
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
@@ -184,8 +183,10 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **Phase D-2 재개 (진행 중, PR #7):** abort/knee 기준 = 성공 지연 p99(확정) → hold 재측정(ramp 50~600 재스케일, 풀 10 고정) → confirm.js 첫 측정. 재개 절차·결정사항은 `loadtest/HANDOFF-D2.md`. 수치 해석·판단은 인간 몫
-2. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가에 따른 응답 곡선 측정 후 도입 판단
+1. **PR #7 마무리:** D-2 측정 종료 → 스크립트 보정·결과 커밋됨. Draft #7을 정식 PR로 전환·머지 판단(인간). hold만 측정, confirm 미실행(결론상 보류)
+2. **(선택) 경합 시나리오 측정:** D-2는 분산 설계라 "인프라 처리량"만 봄. 락 설계 자체를 보려면 핫좌석 경합 부하가 별도 필요 — 백로그
+3. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가 응답 곡선 측정 후 도입 판단
+4. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
