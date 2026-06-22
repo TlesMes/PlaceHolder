@@ -40,10 +40,13 @@ const confirmError = new Counter('confirm_error');
 const seatExhausted = new Counter('seat_exhausted');   // 미리 hold한 좌석을 다 써버린 횟수
 
 // 성공 지연 p99 abort 임계(ms). 성공 p99가 넘으면 knee로 보고 중단. env로 조정.
-const P99_ABORT_MS = parseInt(__ENV.P99_ABORT_MS || '2000');
+// hold와 통일(2000은 너무 높아 막판에야 걸림).
+const P99_ABORT_MS = parseInt(__ENV.P99_ABORT_MS || '1000');
 const STAGE_DURATION = __ENV.STAGE_DURATION || '30s';
 
 export const options = {
+  // confirm setup은 좌석을 전부 사전 hold해 더 무겁다. k6 기본 60s로는 부족 → 상향.
+  setupTimeout: '600s',
   scenarios: {
     confirm_ramp: {
       executor: 'ramping-arrival-rate',
@@ -91,8 +94,10 @@ export default function (data) {
   }
   const { seatId, token } = holds[idx];
 
+  // tags.name으로 URL 그룹화 — seatId가 URL에 들어가 요청마다 별도 time series가 생기는 걸 막는다.
   const res = http.post(`${BASE_URL}/api/seats/${seatId}/confirm`, null, {
     headers: { 'Authorization': `Bearer ${token}` },
+    tags: { name: 'POST /api/seats/{id}/confirm' },
   });
 
   if (res.status === 200) {
