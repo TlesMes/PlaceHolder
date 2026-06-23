@@ -60,7 +60,44 @@ k6 run -e VUS=50 -e DURATION=1m loadtest/event-list.js
 - 측정일:
 ```
 
+## Phase D-2: hold/confirm knee point
+
+부하(도착률)를 계단식으로 올리며 **포화점(knee)** — 달성 처리량이 천장에 닿고 p99가 꺾이는
+지점 — 을 찾는다. 절대 RPS가 아니라 **곡선의 형태**가 핵심.
+
+> **부하 테스트 vs 동시성 테스트:** "동시 출발 시 한 명만 성공하는가"(락 **정합성**)는
+> JUnit 동시성 테스트(C-1/C-4)가 이미 증명했다. 여기 k6는 그걸 재탕하지 않고
+> **성능 곡선(처리량·지연)** 만 본다. 그래서 경합이 아니라 **분산** 모드로 측정한다.
+
+```bash
+# hold 경로 (단일 행 락). 좌석을 소비하므로 풀을 충분히 크게.
+k6 run -e EVENT_COUNT=400 loadtest/hold.js
+
+# confirm 경로 (좌석+계정 다중 락 + 포인트 차감). setup이 좌석을 미리 hold → confirm만 격리 측정.
+k6 run -e EVENT_COUNT=200 -e START_RATE=50 -e MAX_RATE=400 loadtest/confirm.js
+```
+
+**종료 방식 — 에러 시 자동 중단(abortOnFail).** 고정 상한을 낮게 박으면 시스템이 안 꺾인 채
+그냥 통과해버려 knee를 놓친다. 그래서 `MAX_RATE`는 "절대 안 버틸" 만큼 높게 잡고, 실제 종료는
+**5xx/타임아웃(`*_error`)이 처음 발생하는 지점** = 시스템 한계가 결정한다. 도착률은 올리기만 하고
+내리지 않는다(open-loop) — "성공하면 2배, 지연 늘면 감소" 같은 수렴식 조절은 측정기와 시스템이
+피드백으로 엮여 knee 곡선을 뭉개므로 쓰지 않는다.
+
+knee 구간을 더 촘촘히 보고 싶으면 `START_RATE`를 그 부근으로 끌어올려 좁게 재측정.
+**수치 해석·판단은 인간 몫**(ADR 결론 포함).
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `START_RATE` | 50 | ramp 시작 도착률(req/s). 저부하 구간 스킵용 |
+| `MAX_RATE` | hold 800 / confirm 400 | ramp 상한 도착률 |
+| `STAGE_DURATION` | 30s | 각 ramp 단계 길이 (총 측정은 hold TTL 5분 내로) |
+| `BOOKER_CHARGE` | 1억 | confirm용 booker 1인당 충전 포인트 |
+
+지표(분리 집계): `*_success`(달성 처리량·성공 지연=knee 판정), `*_rejected`(4xx, 측정 오염 신호로 걸러 해석), `*_error`(5xx/타임아웃=진짜 포화). confirm은 `seat_exhausted`가 0이어야 측정 유효(좌석 풀 부족 감지).
+
 ## 파일
 
-- `lib/setup.js` — 공통 데이터 시드(provider/event/booker 생성, 토큰 발급)
-- `event-list.js` — 이벤트 목록 조회 부하 (N+1 측정)
+- `lib/setup.js` — 공통 데이터 시드(provider/event/booker, 좌석 ID 풀, confirm용 잔액·사전 hold)
+- `event-list.js` — 이벤트 목록 조회 부하 (N+1 측정, D-1)
+- `hold.js` — 좌석 홀드 부하 (단일 락 knee, D-2)
+- `confirm.js` — 예약 확정 부하 (다중 락 knee, confirm 격리, D-2)

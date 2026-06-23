@@ -47,6 +47,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/events").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/events/**").permitAll()
+                        // 부하 측정 전용 쿠폰 생성. 컨트롤러가 @Profile("loadtest")라 운영에선 빈이 없어
+                        // 경로가 열려 있어도 404 — loadtest 프로파일에서만 실제로 도달 가능.
+                        .requestMatchers(HttpMethod.POST, "/api/loadtest/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(

@@ -150,18 +150,25 @@ com.placeholder
   - **부호 표시 버그 수정**: `amount`는 타입 무관 양수 크기 저장(방향은 `type`) → 부호를 `TYPE_META.sign`에서 도출(사용=−, 충전/정산=+). Chrome 수동 검증으로 발견(`docs/verification/PR10-frontend-api-검증-2026-06-14.md`)
   - **정산 조회 무페이징 한계 백로그**: `/providers/my/settlement`가 SETTLE 전건 반환 → PROVIDER는 좌석 판매량 비례 증가라 ADR-012 "거래량 적음" 가정이 약함. 측정 후 cursor 페이징 검토(`docs/performance/settlement-query-scalability.md`)
 
-- **Phase E-3: 조회 API 서비스 단위 테스트** — `feature/e3-service-tests`
+- **Phase E-3: 조회 API 서비스 단위 테스트** — PR #11 (머지 완료)
   - PR #8(조회 API 3종)이 테스트 없이 머지된 회귀 안전망 보강. 총 16건, 전부 통과(Testcontainers MySQL)
     - `MyReservationsServiceTest`(3): 매핑·confirmedAt DESC·본인 격리·빈 리스트
     - `PointHistoryServiceTest`(8): 기본 size 20/period 3개월·MAX_SIZE 100 cap·from 필터·cursor strict(<)·다중 페이지 무누락/무중복·nextCursor null·user 격리·CHARGE/DEDUCT 매핑(양수 amount)
     - `ProviderSettlementServiceTest`(5): 잔액+매핑·SETTLE만·빈 목록·계정 없음(UserNotFoundException)·provider 격리
   - **타임스탬프 정밀도 함정:** `created_at`/`confirmed_at`은 `@PrePersist now()` 고정 → cursor/정렬 경계를 결정론적으로 만들려면 저장 후 `JdbcTemplate`으로 덮어씀. 단일 값을 저장값+cursor 파라미터로 동시에 쓰는 경계 테스트는 `truncatedTo(SECONDS)`로 datetime(6) round-trip 일치 보장(self-invocation `@Transactional`은 프록시 미경유라 무효, repository.save 자체 트랜잭션에만 의존)
 
+- **Phase D-2: hold knee point 측정** — PR #7 (`feature/loadtest-hold-confirm-knee`, **측정 종료**)
+  - 방법: 초당 요청 수(도착률)를 점점 올리며 **성공 응답의 지연 p99가 임계(기본 1초)를 넘는 지점**을 한계점으로 보고 자동 중단(A안). 좌석 7.5만(좌석 부족 방지) + 풀 크기 `HIKARI_POOL` env 가변
+  - **풀 크기별 측정 5/10/20(이 PC 기준):** 한계 도착률이 5→10에서 2.2배로 늘고(연결이 부족했다는 뜻) → 10→20에선 거의 안 늘어남(연결 충분, CPU가 한계). 풀 5는 CPU 65%로 노는데도 꺾임=연결 부족. → **병목은 커넥션 풀이 아니라 ~풀10부터 이 PC의 CPU**(앱+MySQL+k6 한 PC 공유, ~880/s). 적정 풀 ≈ 10(기본값), **튜닝 불필요**
+  - **결론:** 시험 범위에선 5xx 미발생 — 풀(10)이 꽉 차면 초과 요청이 **큐에서 대기**하며 에러 대신 지연으로 흡수. **단 "안 죽는다"는 보장 아님:** 과부하 지속/무제한 사용자면 커넥션 대기 30초 초과 → 5xx 예상(+Tomcat 처리 한계 초과). 게다가 5xx 미발생엔 측정 한계도(지연 한계점에서 자동 중단 + k6가 못 보내고 버린 요청이 서버를 과부하서 가림). → 대기열(E-1)은 크래시 방지 아니라 **초과 요청을 빨리 거절(fast-fail)해 지연을 지키는** 능동 제어. ⚠️ 부하를 골고루 분산해 측정해서, 잰 건 **인프라 처리량**이지 "같은 좌석 경합 하 락 설계"가 아님(경합 정확성은 C-4가 증명). **confirm 미실행**. 상세: `loadtest/HANDOFF-D2.md`
+  - 부산물: 측정이 가설을 3회 교정(풀=병목→아니다→10미만에선 맞다). **실질 perf 성과는 D-1(N+1)**, D-2는 보조 결론
+  - 쿠폰 생성 API(`POST /api/loadtest/coupons`, `@Profile("loadtest")` 전용): 운영엔 빈 없어 404
+
 ### 현재 상태
-- **작업 브랜치:** `main` (다음 작업용 신규 브랜치 필요)
-- **마지막 main 커밋:** `Merge pull request #10` (c22f627)
-  - PR #1~6, #8, #5, #9, #10 머지 완료. #7(D-2 draft)만 진행 중
-  - E-3(조회 API + 프론트 연결 + 부호 버그 수정)까지 완료 → 마이페이지·정산 대시보드 실데이터 동작 검증됨
+- **작업 브랜치:** `feature/loadtest-hold-confirm-knee` (Draft PR #7, main 동기화 완료 — PR #10·#11 반영)
+- **마지막 main 커밋:** `Merge pull request #11` (56480d5)
+  - PR #1~6, #8, #5, #9, #10, #11 머지 완료. #7(D-2)은 측정 종료 → 정식 PR 전환 대기
+  - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종)까지 완료
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -172,11 +179,14 @@ com.placeholder
   - **GET /api/reservations/my** - 내 예약 내역 (BOOKER) ★ E-3
   - **GET /api/points/history** - 포인트 이력 cursor 페이징 (BOOKER/PROVIDER) ★ E-3
   - **GET /api/providers/my/settlement** - 정산 잔액 + SETTLE 거래 목록 (PROVIDER) ★ E-3
+  - POST /api/loadtest/coupons - 쿠폰 생성 (**loadtest 프로파일 전용**, 운영 404)
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **Phase D-2**: hold/confirm knee point 측정 (별도 브랜치 `feature/loadtest-hold-confirm-knee`, draft PR #7 재개). 1차 측정 결과 5xx 0 → abort/knee 기준 재정의 결정 대기 중. 인수인계: `loadtest/HANDOFF-D2.md`
-2. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가에 따른 응답 곡선 측정 후 도입 판단
+1. **PR #7 마무리:** D-2 측정 종료 → 스크립트 보정·결과 커밋됨. Draft #7을 정식 PR로 전환·머지 판단(인간). hold만 측정, confirm 미실행(결론상 보류)
+2. **(선택) 경합 시나리오 측정:** D-2는 분산 설계라 "인프라 처리량"만 봄. 락 설계 자체를 보려면 핫좌석 경합 부하가 별도 필요 — 백로그
+3. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가 응답 곡선 측정 후 도입 판단
+4. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
