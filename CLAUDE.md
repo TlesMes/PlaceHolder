@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.14 기준)
+## 현재 진행 상황 (2026.06.25 기준)
 
 > 완료 항목은 "무엇을/왜"만 요약. 구현 디테일·근거는 해당 ADR / PR에서 확인.
 
@@ -157,17 +157,17 @@ com.placeholder
     - `ProviderSettlementServiceTest`(5): 잔액+매핑·SETTLE만·빈 목록·계정 없음(UserNotFoundException)·provider 격리
   - **타임스탬프 정밀도 함정:** `created_at`/`confirmed_at`은 `@PrePersist now()` 고정 → cursor/정렬 경계를 결정론적으로 만들려면 저장 후 `JdbcTemplate`으로 덮어씀. 단일 값을 저장값+cursor 파라미터로 동시에 쓰는 경계 테스트는 `truncatedTo(SECONDS)`로 datetime(6) round-trip 일치 보장(self-invocation `@Transactional`은 프록시 미경유라 무효, repository.save 자체 트랜잭션에만 의존)
 
-- **Phase D-2: hold knee point 측정** — PR #7 (`feature/loadtest-hold-confirm-knee`, **측정 종료**)
+- **Phase D-2: hold knee point 측정** — PR #7 (`feature/loadtest-hold-confirm-knee`, **머지 완료 2026-06-23**)
   - 방법: 초당 요청 수(도착률)를 점점 올리며 **성공 응답의 지연 p99가 임계(기본 1초)를 넘는 지점**을 한계점으로 보고 자동 중단(A안). 좌석 7.5만(좌석 부족 방지) + 풀 크기 `HIKARI_POOL` env 가변
   - **풀 크기별 측정 5/10/20(이 PC 기준):** 한계 도착률이 5→10에서 2.2배로 늘고(연결이 부족했다는 뜻) → 10→20에선 거의 안 늘어남(연결 충분, CPU가 한계). 풀 5는 CPU 65%로 노는데도 꺾임=연결 부족. → **병목은 커넥션 풀이 아니라 ~풀10부터 이 PC의 CPU**(앱+MySQL+k6 한 PC 공유, ~880/s). 적정 풀 ≈ 10(기본값), **튜닝 불필요**
-  - **결론:** 시험 범위에선 5xx 미발생 — 풀(10)이 꽉 차면 초과 요청이 **큐에서 대기**하며 에러 대신 지연으로 흡수. **단 "안 죽는다"는 보장 아님:** 과부하 지속/무제한 사용자면 커넥션 대기 30초 초과 → 5xx 예상(+Tomcat 처리 한계 초과). 게다가 5xx 미발생엔 측정 한계도(지연 한계점에서 자동 중단 + k6가 못 보내고 버린 요청이 서버를 과부하서 가림). → 대기열(E-1)은 크래시 방지 아니라 **초과 요청을 빨리 거절(fast-fail)해 지연을 지키는** 능동 제어. ⚠️ 부하를 골고루 분산해 측정해서, 잰 건 **인프라 처리량**이지 "같은 좌석 경합 하 락 설계"가 아님(경합 정확성은 C-4가 증명). **confirm 미실행**. 상세: `loadtest/HANDOFF-D2.md`
+  - **결론:** 시험 범위에선 5xx 미발생. **단 이는 서버가 우아하게 버텼다는 증거가 아님** — k6(부하생성기)가 응답 지연 시 요청 생성을 스스로 밀거나 drop해, 서버를 실제 한계까지 밀지 못했다(coordinated omission / 생성기 자체 병목). 지연 한계점 자동 중단도 서버가 깨지기 전에 멈춘 것. 요컨대 **"안 죽는다"도 "죽는다"도 이 측정으로는 말할 수 없음**. 과부하 지속/무제한 사용자면 커넥션 대기 30초 초과 → 5xx 예상이나, 그 구간을 실제로 측정하지 않았음. → 대기열(E-1)의 필요성은 **입증된 것이 아니라 미지(未知)**; 진짜 확인하려면 부하생성기를 분리(별도 머신 또는 closed-loop 보정)해야 함. ⚠️ 부하를 골고루 분산해 측정해서, 잰 건 **인프라 처리량**이지 "같은 좌석 경합 하 락 설계"가 아님(경합 정확성은 C-4가 증명). **confirm 미실행**. 상세: `loadtest/HANDOFF-D2.md`
   - 부산물: 측정이 가설을 3회 교정(풀=병목→아니다→10미만에선 맞다). **실질 perf 성과는 D-1(N+1)**, D-2는 보조 결론
   - 쿠폰 생성 API(`POST /api/loadtest/coupons`, `@Profile("loadtest")` 전용): 운영엔 빈 없어 404
 
 ### 현재 상태
-- **작업 브랜치:** `feature/loadtest-hold-confirm-knee` (Draft PR #7, main 동기화 완료 — PR #10·#11 반영)
-- **마지막 main 커밋:** `Merge pull request #11` (56480d5)
-  - PR #1~6, #8, #5, #9, #10, #11 머지 완료. #7(D-2)은 측정 종료 → 정식 PR 전환 대기
+- **작업 브랜치:** `main`
+- **마지막 main 커밋:** `Merge pull request #7` (c724960)
+  - PR #1~7, #8, #5, #9, #10, #11 머지 완료. D-2(PR #7) 2026-06-23 머지
   - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종)까지 완료
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
@@ -183,8 +183,8 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **PR #7 마무리:** D-2 측정 종료 → 스크립트 보정·결과 커밋됨. Draft #7을 정식 PR로 전환·머지 판단(인간). hold만 측정, confirm 미실행(결론상 보류)
-2. **(선택) 경합 시나리오 측정:** D-2는 분산 설계라 "인프라 처리량"만 봄. 락 설계 자체를 보려면 핫좌석 경합 부하가 별도 필요 — 백로그
+1. **E-1 대기열 설계 ADR:** 전제를 "필요성 미지"로 솔직하게 — D-2 측정 한계(생성기 병목으로 서버 진짜 한계 미확인) 명시. Redis Sorted Set 순번 + 입장 토큰 + 대기 상태 통지 설계. 구현보다 설계안+ADR이 포트폴리오 포인트(master_plan 기준 OK)
+2. **(선택) 경합/지속과부하 시나리오 측정:** D-1 대기열 필요성을 실측으로 입증하려면 부하생성기 별도 머신 + 핫좌석 경합 부하 필요. E-1 착수 전후 어느 쪽이든 가능 — 백로그
 3. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가 응답 곡선 측정 후 도입 판단
 4. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
 
