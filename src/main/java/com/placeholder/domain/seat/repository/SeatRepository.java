@@ -25,6 +25,15 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     List<Seat> findByEventId(Long eventId);
 
     /**
+     * 대기열 게이트용: 좌석이 속한 이벤트의 id와 대기열 활성화 여부만 비잠금으로 조회한다 (E-1 3단계).
+     * hold가 비관적 락(findByIdForUpdate)을 잡기 전에 fast-fail 판정하기 위함 — 락 보유 중
+     * Redis I/O를 피한다.
+     */
+    @Query("select s.event.id as eventId, s.event.queueEnabled as queueEnabled " +
+           "from Seat s where s.id = :seatId")
+    Optional<SeatGateProjection> findGateInfoBySeatId(@Param("seatId") Long seatId);
+
+    /**
      * 여러 이벤트의 좌석 통계(전체/AVAILABLE)를 GROUP BY로 한 번에 집계한다.
      * 이벤트 수에 무관하게 쿼리 1개 (ADR-011).
      * fetch join이 아니라 집계를 쓰는 이유: 카운트 목적에 좌석 전체 로딩은 낭비이고,

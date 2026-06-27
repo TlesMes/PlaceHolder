@@ -13,6 +13,7 @@ public class EventDetailResponse {
     private String title;
     private String venue;
     private LocalDateTime eventAt;
+    private boolean queueEnabled;
     private List<SeatInfo> seats;
 
     @Getter

@@ -45,6 +45,7 @@ public class EventService {
                 .title(request.getTitle())
                 .venue(request.getVenue())
                 .eventAt(request.getEventAt())
+                .queueEnabled(request.isQueueEnabled())
                 .build();
 
         Event savedEvent = eventRepository.save(event);
@@ -118,6 +119,7 @@ public class EventService {
                 .title(event.getTitle())
                 .venue(event.getVenue())
                 .eventAt(event.getEventAt())
+                .queueEnabled(event.isQueueEnabled())
                 .seats(seatInfos)
                 .build();
     }

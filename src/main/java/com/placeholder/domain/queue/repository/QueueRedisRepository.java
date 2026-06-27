@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.time.Duration;
+
 /**
  * 대기열 Redis 접근 계층 (ADR-013).
  *
@@ -56,7 +58,15 @@ public class QueueRedisRepository {
     }
 
     /**
-     * 입장 토큰 보유 여부. 입장 차례가 된 사용자에게 스케줄러가 발급한다(E-1 4단계).
+     * 입장 토큰 발급. 입장 차례가 된 사용자에게 스케줄러가 호출한다(E-1 4단계).
+     * 시간 박스형 — TTL 동안만 hold 진입을 허용하고, 만료되면 대기열 재진입이 필요하다(ADR-013).
+     */
+    public void issueEntryToken(Long eventId, Long userId, Duration ttl) {
+        redis.opsForValue().set(entryTokenKey(eventId, userId), "1", ttl);
+    }
+
+    /**
+     * 입장 토큰 보유 여부. hold 게이트가 이 값으로 진입을 판정한다(존재 확인, 단발 소비 아님).
      */
     public boolean hasEntryToken(Long eventId, Long userId) {
         return Boolean.TRUE.equals(redis.hasKey(entryTokenKey(eventId, userId)));

@@ -4,11 +4,14 @@ import com.placeholder.domain.event.dto.EventCreateRequest;
 import com.placeholder.domain.event.entity.Event;
 import com.placeholder.domain.seat.dto.SeatHoldResponse;
 import com.placeholder.domain.seat.dto.SeatResponse;
+import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.seat.entity.Seat;
+import com.placeholder.domain.seat.repository.SeatGateProjection;
 import com.placeholder.domain.seat.repository.SeatRepository;
 import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
 import com.placeholder.global.exception.custom.DuplicateSeatLabelException;
+import com.placeholder.global.exception.custom.QueueAdmissionRequiredException;
 import com.placeholder.global.exception.custom.SeatNotAvailableException;
 import com.placeholder.global.exception.custom.SeatNotFoundException;
 import com.placeholder.global.exception.custom.UserNotFoundException;
@@ -29,6 +32,7 @@ public class SeatService {
 
     private final SeatRepository seatRepository;
     private final UserRepository userRepository;
+    private final QueueRedisRepository queueRepository;
 
     @Value("${seat.hold.ttl-minutes:5}")
     private int holdTtlMinutes;
@@ -69,6 +73,8 @@ public class SeatService {
      */
     @Transactional
     public SeatHoldResponse holdSeat(Long seatId, Long bookerId) {
+        enforceQueueAdmission(seatId, bookerId);
+
         Seat seat = seatRepository.findByIdForUpdate(seatId)
                 .orElseThrow(() -> new SeatNotFoundException("좌석을 찾을 수 없습니다"));
 
@@ -89,6 +95,20 @@ public class SeatService {
                 .heldBy(booker.getId())
                 .heldUntil(seat.getHeldUntil())
                 .build();
+    }
+
+    /**
+     * 대기열 게이트 (ADR-013). 좌석 행을 잠그기 전에 비잠금으로 이벤트의 대기열 활성화 여부를 확인하고,
+     * 활성화된 이벤트라면 입장 토큰 없이는 fast-fail 한다 — 락/커넥션 점유 전에 거절해 트래픽을 보호한다.
+     * 비활성 이벤트는 토큰 없이 그대로 통과한다(소형 이벤트 오버엔지니어링 방지).
+     */
+    private void enforceQueueAdmission(Long seatId, Long bookerId) {
+        SeatGateProjection gate = seatRepository.findGateInfoBySeatId(seatId)
+                .orElseThrow(() -> new SeatNotFoundException("좌석을 찾을 수 없습니다"));
+
+        if (gate.isQueueEnabled() && !queueRepository.hasEntryToken(gate.getEventId(), bookerId)) {
+            throw new QueueAdmissionRequiredException("대기열 입장 토큰이 필요합니다. 대기열에 진입해 주세요");
+        }
     }
 
     /**

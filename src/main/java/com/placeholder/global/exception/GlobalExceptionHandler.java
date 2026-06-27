@@ -9,6 +9,7 @@ import com.placeholder.global.exception.custom.EventNotFoundException;
 import com.placeholder.global.exception.custom.InsufficientPointException;
 import com.placeholder.global.exception.custom.InvalidCredentialsException;
 import com.placeholder.global.exception.custom.InvalidUserRoleException;
+import com.placeholder.global.exception.custom.QueueAdmissionRequiredException;
 import com.placeholder.global.exception.custom.ReservationNotFoundException;
 import com.placeholder.global.exception.custom.SeatNotAvailableException;
 import com.placeholder.global.exception.custom.SeatNotFoundException;
@@ -156,6 +157,20 @@ public class GlobalExceptionHandler {
                 .timestamp(LocalDateTime.now())
                 .build();
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+    }
+
+    /**
+     * 대기열 입장 토큰 없이 hold 시도 (ADR-013). 트래픽 셰이핑 거절이므로 429로 응답해
+     * 클라이언트가 대기열 진입 후 재시도하도록 유도한다.
+     */
+    @ExceptionHandler(QueueAdmissionRequiredException.class)
+    public ResponseEntity<ErrorResponse> handleQueueAdmissionRequired(QueueAdmissionRequiredException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("QUEUE_ADMISSION_REQUIRED")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(response);
     }
 
     /**
