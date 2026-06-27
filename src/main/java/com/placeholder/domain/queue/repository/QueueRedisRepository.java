@@ -1,10 +1,17 @@
 package com.placeholder.domain.queue.repository;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations.TypedTuple;
 import org.springframework.stereotype.Repository;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 대기열 Redis 접근 계층 (ADR-013).
@@ -23,12 +30,19 @@ public class QueueRedisRepository {
 
     private final StringRedisTemplate redis;
 
+    /** 대기열이 비어있지 않은(활성) 이벤트 id 집합. 스케줄러가 순회 대상으로 삼는다. */
+    private static final String ACTIVE_QUEUES_KEY = "queue:active-events";
+
     private static String queueKey(Long eventId) {
         return "queue:" + eventId;
     }
 
     private static String entryTokenKey(Long eventId, Long userId) {
         return "entry:" + eventId + ":" + userId;
+    }
+
+    private static String entryTokenPattern(Long eventId) {
+        return "entry:" + eventId + ":*";
     }
 
     /**
@@ -39,6 +53,8 @@ public class QueueRedisRepository {
     public boolean enqueue(Long eventId, Long userId, long timestampMillis) {
         Boolean added = redis.opsForZSet()
                 .addIfAbsent(queueKey(eventId), String.valueOf(userId), timestampMillis);
+        // 스케줄러가 KEYS 스캔 없이 활성 대기열만 순회하도록 활성 집합에 등록한다.
+        redis.opsForSet().add(ACTIVE_QUEUES_KEY, String.valueOf(eventId));
         return Boolean.TRUE.equals(added);
     }
 
@@ -70,5 +86,70 @@ public class QueueRedisRepository {
      */
     public boolean hasEntryToken(Long eventId, Long userId) {
         return Boolean.TRUE.equals(redis.hasKey(entryTokenKey(eventId, userId)));
+    }
+
+    // --- 배치 입장 스케줄러용 (E-1 4단계) ---
+
+    /**
+     * 대기열이 비어있지 않은(활성) 이벤트 id 목록. 스케줄러 순회 대상.
+     */
+    public Set<Long> activeQueueEventIds() {
+        Set<String> members = redis.opsForSet().members(ACTIVE_QUEUES_KEY);
+        if (members == null || members.isEmpty()) {
+            return Set.of();
+        }
+        return members.stream().map(Long::valueOf).collect(Collectors.toSet());
+    }
+
+    /**
+     * 활성 집합에서 이벤트를 제거한다. 대기열이 빈 이벤트를 스케줄러가 정리할 때 호출한다.
+     */
+    public void unmarkActiveQueue(Long eventId) {
+        redis.opsForSet().remove(ACTIVE_QUEUES_KEY, String.valueOf(eventId));
+    }
+
+    /**
+     * 현재 유효한 입장 토큰 수(in-flight 입장자). SCAN으로 비차단 집계한다.
+     *
+     * <p>ADR-013 의사코드의 {@code current_held_count}를 "유효 입장 토큰 수"로 구체화했다.
+     * HELD 좌석 수로 세면 토큰만 받고 아직 hold 안 한 입장자가 누락돼 한 틱 내 과다 입장이
+     * 생길 수 있다. 입장 토큰 자체를 세면 hold 영역에 들어온 in-flight 인원을 정확히 반영한다.
+     */
+    public long countActiveEntryTokens(Long eventId) {
+        ScanOptions options = ScanOptions.scanOptions()
+                .match(entryTokenPattern(eventId)).count(100).build();
+        long count = 0;
+        try (Cursor<String> cursor = redis.scan(options)) {
+            while (cursor.hasNext()) {
+                cursor.next();
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 대기열 맨 앞에서 최대 count명을 원자적으로 꺼낸다(ZPOPMIN). FIFO 보장.
+     * 꺼낸 사용자는 대기열에서 제거되므로 이후 status 조회 시 position이 사라진다.
+     *
+     * @return 꺼낸 userId 목록(진입 순서)
+     */
+    public List<Long> popNextWaiting(Long eventId, long count) {
+        if (count <= 0) {
+            return List.of();
+        }
+        Set<TypedTuple<String>> popped = redis.opsForZSet().popMin(queueKey(eventId), count);
+        if (popped == null || popped.isEmpty()) {
+            return List.of();
+        }
+        // popMin은 score 오름차순(=진입 순서)을 보장한다.
+        List<Long> userIds = new ArrayList<>(popped.size());
+        for (TypedTuple<String> tuple : popped) {
+            String value = tuple.getValue();
+            if (value != null) {
+                userIds.add(Long.valueOf(value));
+            }
+        }
+        return userIds;
     }
 }
