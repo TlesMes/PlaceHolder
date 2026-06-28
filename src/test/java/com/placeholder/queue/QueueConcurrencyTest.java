@@ -40,8 +40,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <ul>
  *   <li><b>스케줄러 race:</b> admitWaiting()을 여러 스레드가 동시에 호출해도 ZPOPMIN 원자성으로
  *       각 대기자는 정확히 한 번만 입장(중복 토큰 없음, 유실 없음) — 토큰 보유 ⊕ 대기 중 분할이 깨지지 않는다.</li>
- *   <li><b>토큰 + 락 합성:</b> 입장 토큰을 가진 다수가 같은 좌석을 동시에 hold 해도 비관적 락(ADR-008)이
- *       정확히 한 명만 성공시킨다. 대기열은 트래픽만 셰이핑하고 정합성은 락이 책임진다는 2층 구조 검증.</li>
+ *   <li><b>게이트 + 락 합성(회귀):</b> 락 배타성 자체(1명 성공/N-1 충돌)는 C-4
+ *       {@code SeatHoldConcurrencyTest}가 이미 증명한다. 여기서 새로 보는 건 <b>게이트가 켜진 경로</b>다 —
+ *       hold 앞에 끼워넣은 게이트({@code enforceQueueAdmission}, Redis 토큰 조회)가 동시 상황에서
+ *       토큰 보유자를 거짓 거절하지 않고(admissionDenied=0), 그 새 단계를 거쳐도 락 배타성이
+ *       그대로 유지됨을 확인한다. 대기열=트래픽, 정합성=락이라는 2층 구조가 합성 후에도 깨지지 않는다.</li>
  * </ul>
  */
 @SpringBootTest
@@ -95,7 +98,7 @@ class QueueConcurrencyTest extends RedisIntegrationTest {
     }
 
     @Test
-    @DisplayName("토큰 보유자 다수가 같은 좌석 동시 hold: 락이 한 명만 성공시킨다")
+    @DisplayName("게이트 활성 경로 합성: 토큰 보유자 다수 동시 hold에도 게이트는 안 막고 락 배타성 유지")
     void concurrent_hold_withTokens_onlyOneWins() throws InterruptedException {
         int n = 10; // 커넥션 풀(10) 내에서 락 경합
         Event event = persistEvent(true);
