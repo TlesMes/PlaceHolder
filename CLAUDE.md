@@ -193,7 +193,13 @@ com.placeholder
 
 ### 다음 작업 (우선순위 순)
 1. **E-1 PR #13 머지:** self review 후 머지 → main 복귀. (설계 ADR-013 + 구현 5단계 + 테스트 완료, PR 오픈 상태)
-2. **(선택) 경합/지속과부하 시나리오 측정:** D-1 대기열 필요성을 실측으로 입증하려면 부하생성기 별도 머신 + 핫좌석 경합 부하 필요. E-1 착수 전후 어느 쪽이든 가능 — 백로그
+2. **E-1 프론트엔드 (대기실 페이지):** 백엔드 API는 완성, UI 전무. 구현 범위:
+   - `frontend/src/pages/QueueWaiting.tsx` — 순번·대기 인원 표시, 2초 폴링(`GET /api/queue/{eventId}/status`), `admitted=true` 감지 시 EventDetail로 리다이렉트
+   - `frontend/src/api/queue.ts` — `enter(eventId)`, `status(eventId)` 추가
+   - EventDetail의 "좌석 선택" 버튼: `queueEnabled` 이벤트면 QueueWaiting으로, 아니면 기존 hold 직통
+   - EventCreateForm에 `queueEnabled` 토글 (PROVIDER, 기본 false)
+   - 색상은 반드시 CSS 변수 토큰만 (`bg-surface`, `text-fg` 등, `index.css`/`tailwind.config.js` 참조)
+3. **(선택) 경합/지속과부하 시나리오 측정:** D-1 대기열 필요성을 실측으로 입증하려면 부하생성기 별도 머신 + 핫좌석 경합 부하 필요. E-1 착수 전후 어느 쪽이든 가능 — 백로그
 3. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가 응답 곡선 측정 후 도입 판단
 4. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
 
