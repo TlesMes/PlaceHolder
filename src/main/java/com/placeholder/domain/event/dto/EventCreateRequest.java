@@ -26,6 +26,9 @@ public class EventCreateRequest {
     @Valid
     private List<SeatMetadataDto> seats;
 
+    /** 인기 이벤트만 대기열 활성화 (ADR-013). 미지정 시 false. */
+    private boolean queueEnabled;
+
     @Getter
     @NoArgsConstructor
     public static class SeatMetadataDto {

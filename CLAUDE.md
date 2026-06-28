@@ -164,11 +164,20 @@ com.placeholder
   - 부산물: 측정이 가설을 3회 교정(풀=병목→아니다→10미만에선 맞다). **실질 perf 성과는 D-1(N+1)**, D-2는 보조 결론
   - 쿠폰 생성 API(`POST /api/loadtest/coupons`, `@Profile("loadtest")` 전용): 운영엔 빈 없어 404
 
+- **Phase E-1: Redis 대기열** — PR #13 (`feature/queue-redis-implementation`, **PR 오픈 2026-06-27, 미머지**)
+  - ADR-013 설계를 구현. **대기열=트래픽 셰이핑만**, 좌석 정합성은 기존 비관적 락(ADR-008)이 유지하는 2층 구조. `queueEnabled=true` 이벤트만 게이트 동작, 비활성·Redis 장애 시 hold 그대로 통과(graceful degradation, 하위호환)
+  - 구현: Redis Sorted Set 순번(`enqueue` ZADD NX로 FIFO 보존/`rank`), 입장 토큰(String+TTL, `issueEntryToken`/`hasEntryToken`), hold 게이트(`SeatService.enforceQueueAdmission` — 락 잡기 전 비잠금 projection으로 fast-fail), 배치 입장 스케줄러(얇은 `QueueAdmissionScheduler` → `QueueAdmissionService.admitWaiting` ZPOPMIN)
+  - **`current_held_count`를 "유효 입장 토큰 수"(SCAN)로 구체화:** HELD 좌석 수로 세면 토큰만 받고 hold 전인 in-flight가 누락돼 한 틱 내 과다 입장 → 토큰 자체를 셈
+  - 테스트 73종 전부 통과(큐 신규 15: smoke 1/QueueService 5/SeatHoldQueueGate 3/QueueAdmissionService 4/QueueConcurrency 2). 동시성: 스케줄러 race(ZPOPMIN 원자성→토큰 XOR 대기 분할 불변식) + 토큰·락 합성(토큰 보유자 다수 동시 hold→락이 1명만 성공)
+  - **게이트(3단계)와 스케줄러(4단계)는 분리 불가** — 토큰 발급 주체 없으면 queueEnabled 이벤트 영구 입장 거부 → 단일 PR로 묶음
+  - 한계: 대기열 **필요성 자체는 미입증**(D-2 생성기 병목). 이 PR은 "필요해서"가 아니라 **설계안을 구현으로 증명**하는 포트폴리오 단위
+
 ### 현재 상태
-- **작업 브랜치:** `main`
+- **작업 브랜치:** `feature/queue-redis-implementation` (E-1, PR #13 리뷰 대기 중)
 - **마지막 main 커밋:** `Merge pull request #7` (c724960)
   - PR #1~7, #8, #5, #9, #10, #11 머지 완료. D-2(PR #7) 2026-06-23 머지
   - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종)까지 완료
+  - **E-1(PR #13) 오픈, 머지 대기.** 머지 후 `main` 복귀 + 이 섹션 갱신 필요
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -183,7 +192,7 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **E-1 대기열 설계 ADR:** 전제를 "필요성 미지"로 솔직하게 — D-2 측정 한계(생성기 병목으로 서버 진짜 한계 미확인) 명시. Redis Sorted Set 순번 + 입장 토큰 + 대기 상태 통지 설계. 구현보다 설계안+ADR이 포트폴리오 포인트(master_plan 기준 OK)
+1. **E-1 PR #13 머지:** self review 후 머지 → main 복귀. (설계 ADR-013 + 구현 5단계 + 테스트 완료, PR 오픈 상태)
 2. **(선택) 경합/지속과부하 시나리오 측정:** D-1 대기열 필요성을 실측으로 입증하려면 부하생성기 별도 머신 + 핫좌석 경합 부하 필요. E-1 착수 전후 어느 쪽이든 가능 — 백로그
 3. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가 응답 곡선 측정 후 도입 판단
 4. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
