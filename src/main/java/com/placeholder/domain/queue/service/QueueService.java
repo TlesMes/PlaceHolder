@@ -18,14 +18,20 @@ import org.springframework.stereotype.Service;
 public class QueueService {
 
     private final QueueRedisRepository queueRepository;
+    private final QueueAdmissionService admissionService;
     private final EventRepository eventRepository;
 
     /**
      * 대기열 진입 후 현재 상태를 반환한다. 이미 대기 중이면 순번은 유지된다(ZADD NX).
+     *
+     * <p>진입 직후 fast-path로 즉시 입장 1건을 시도한다 — 빈자리가 있으면 다음 스케줄러 틱(최대 1초)을
+     * 기다리지 않고 대기열 맨 앞이 바로 입장한다. 호출자가 맨 앞이면 응답의 {@code admitted=true}로
+     * 즉시 hold 진행이 가능하다. ceiling·rate 판정은 Lua가 원자 처리하므로 스케줄러와 동시 호출돼도 안전.
      */
     public QueueStatusResponse enter(Long eventId, Long userId) {
         requireEventExists(eventId);
         queueRepository.enqueue(eventId, userId, System.currentTimeMillis());
+        admissionService.admitForEvent(eventId, 1);
         return buildStatus(eventId, userId);
     }
 

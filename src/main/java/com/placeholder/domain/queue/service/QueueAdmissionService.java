@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -44,8 +43,6 @@ public class QueueAdmissionService {
      */
     public int admitWaiting() {
         Set<Long> eventIds = queueRepository.activeQueueEventIds();
-        long now = System.currentTimeMillis();
-        long ttlMs = Duration.ofMinutes(entryTokenTtlMinutes).toMillis();
         int admitted = 0;
         for (Long eventId : eventIds) {
             // 빈 대기열은 활성 집합에서 정리.
@@ -53,14 +50,24 @@ public class QueueAdmissionService {
                 queueRepository.unmarkActiveQueue(eventId);
                 continue;
             }
-            // ceiling·rate는 Lua가 전역 기준으로 판정한다. max는 이 호출의 상한(틱당 rate 이내).
-            List<Long> users = queueRepository.admit(
-                    eventId, now, maxActiveSessions, ratePerSecond, ttlMs, ratePerSecond);
-            admitted += users.size();
+            // 틱당 최대 ratePerSecond명까지 시도(실제 상한은 Lua의 전역 ceiling·rate가 판정).
+            admitted += admitForEvent(eventId, ratePerSecond);
         }
         if (admitted > 0) {
             log.info("대기열 입장 토큰 {}건 발급 (활성 이벤트 {}개)", admitted, eventIds.size());
         }
         return admitted;
+    }
+
+    /**
+     * 단일 이벤트에 대해 ceiling·rate 한도 내 최대 {@code max}명을 입장시킨다.
+     * 스케줄러와 {@code enter()} fast-path가 공유한다. ceiling·rate 판정·발급은 Lua가 원자 처리.
+     *
+     * @return 실제 발급한 입장 토큰 수
+     */
+    public int admitForEvent(Long eventId, int max) {
+        long now = System.currentTimeMillis();
+        long ttlMs = Duration.ofMinutes(entryTokenTtlMinutes).toMillis();
+        return queueRepository.admit(eventId, now, maxActiveSessions, ratePerSecond, ttlMs, max).size();
     }
 }
