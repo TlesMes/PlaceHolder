@@ -13,37 +13,45 @@ export default function QueueWaitingPage() {
   const timerRef = useRef(null);
 
   const goToEvent = useCallback(() => {
-    clearInterval(timerRef.current);
+    clearTimeout(timerRef.current);
     navigate(`/events/${eventId}`, { replace: true });
   }, [eventId, navigate]);
 
   useEffect(() => {
     let cancelled = false;
 
+    // 폴링 주기는 서버가 status 응답의 nextPollDelayMs로 동적 제어한다(앞 인원/rate 기반).
+    // 주기가 매번 달라지므로 setInterval 대신 응답 수신 후 재귀 setTimeout으로 다음 폴을 예약한다.
+    const DEFAULT_DELAY = 3000; // 응답에 값이 없거나 일시 오류 시 폴백
+    const scheduleNext = (delayMs) => {
+      timerRef.current = setTimeout(poll, delayMs || DEFAULT_DELAY);
+    };
+
+    async function poll() {
+      try {
+        const res = await getQueueStatus(eventId);
+        if (cancelled) return;
+        setStatus(res.data);
+        if (res.data.admitted) {
+          goToEvent();
+          return;
+        }
+        scheduleNext(res.data.nextPollDelayMs);
+      } catch {
+        if (!cancelled) scheduleNext(DEFAULT_DELAY); // 일시 오류 — 기본 간격 재시도
+      }
+    }
+
     async function init() {
       try {
         const res = await enterQueue(eventId);
         if (cancelled) return;
-        const data = res.data;
-        setStatus(data);
-        if (data.admitted) {
+        setStatus(res.data);
+        if (res.data.admitted) {
           goToEvent();
           return;
         }
-
-        timerRef.current = setInterval(async () => {
-          try {
-            const pollRes = await getQueueStatus(eventId);
-            if (cancelled) return;
-            const pollData = pollRes.data;
-            setStatus(pollData);
-            if (pollData.admitted) {
-              goToEvent();
-            }
-          } catch {
-            // 일시 네트워크 오류는 무시하고 폴링 계속
-          }
-        }, 2000);
+        scheduleNext(res.data.nextPollDelayMs);
       } catch (err) {
         if (!cancelled) setError(toMessage(err, '대기열 진입에 실패했습니다.'));
       }
@@ -53,7 +61,7 @@ export default function QueueWaitingPage() {
 
     return () => {
       cancelled = true;
-      clearInterval(timerRef.current);
+      clearTimeout(timerRef.current);
     };
   }, [eventId, goToEvent]);
 
@@ -94,7 +102,7 @@ export default function QueueWaitingPage() {
           <Spinner className="mt-10" />
         )}
 
-        <p className="mt-8 text-xs text-fg-subtle">약 2초마다 자동으로 갱신됩니다.</p>
+        <p className="mt-8 text-xs text-fg-subtle">대기 인원에 맞춰 자동으로 갱신됩니다.</p>
       </div>
     </Layout>
   );

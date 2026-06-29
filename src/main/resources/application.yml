@@ -42,6 +42,10 @@ queue:
     # 초당 입장 허용 수 전역 상한 (R). 유입 스파이크 평탄화.
     rate-per-second: 20
     scan-interval-ms: 1000   # 배치 입장 스케줄러 주기(ms). ceiling·rate 한도 내 대기열 → 입장 토큰 발급
+  status:
+    # 동적 폴링 주기 범위(ms). 서버가 (앞 인원 / rate) 예상 대기시간을 이 범위로 클램프해 내려준다.
+    min-poll-ms: 2000
+    max-poll-ms: 10000
 
 jwt:
   secret: ${JWT_SECRET:placeholder-dev-secret-key-must-be-at-least-32-bytes!!}

@@ -3,6 +3,7 @@ package com.placeholder.queue;
 import com.placeholder.domain.event.entity.Event;
 import com.placeholder.domain.event.repository.EventRepository;
 import com.placeholder.domain.queue.dto.QueueStatusResponse;
+import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.queue.service.QueueService;
 import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
@@ -47,6 +48,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class QueueServiceTest extends RedisIntegrationTest {
 
     @Autowired QueueService queueService;
+    @Autowired QueueRedisRepository queueRepository;
     @Autowired EventRepository eventRepository;
     @Autowired UserRepository userRepository;
     @Autowired StringRedisTemplate redis;
@@ -126,6 +128,23 @@ class QueueServiceTest extends RedisIntegrationTest {
 
         assertThatThrownBy(() -> queueService.enter(999_999L, userId))
                 .isInstanceOf(EventNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("nextPollDelayMs: 앞 인원/rate 예상 대기시간을 [min,max]로 클램프")
+    void status_nextPollDelay_scalesWithPosition() {
+        Long eventId = persistEvent().getId();
+        // 합성 id로 81명 대기열 구성 (ceiling=0이라 입장 없음). test rate=8, min=2000, max=10000.
+        for (long u = 1; u <= 81; u++) {
+            queueRepository.enqueue(eventId, u, 1_000L + u);
+        }
+
+        // 맨 앞(ahead 0) → 0ms → 하한 2000으로 클램프
+        assertThat(queueService.status(eventId, 1L).getNextPollDelayMs()).isEqualTo(2000L);
+        // ahead 40 → 40*1000/8 = 5000 (범위 내)
+        assertThat(queueService.status(eventId, 41L).getNextPollDelayMs()).isEqualTo(5000L);
+        // ahead 80 → 80*1000/8 = 10000 (상한 경계)
+        assertThat(queueService.status(eventId, 81L).getNextPollDelayMs()).isEqualTo(10000L);
     }
 
     // --- 셋업 헬퍼 ---
