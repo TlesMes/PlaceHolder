@@ -16,7 +16,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -39,12 +38,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <p>싱글톤 Redis 컨테이너는 JVM 전체에서 키를 공유하므로, 테스트마다 keys 패턴으로 정리한다.
  *
- * <p>enter()는 fast-path로 즉시 입장 1건을 시도하므로, 순수 큐 메커니즘(순번/FIFO/멱등)을 격리하려고
- * {@code max-active-sessions=0}으로 즉시 입장을 비활성화한다(fast-path 동작은 {@link QueueEnterFastPathTest}).
+ * <p>enter()는 enqueue만 하고 입장은 스케줄러가 담당하므로, 진입 직후 status는 항상 대기 상태(admitted=false)다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
-@TestPropertySource(properties = "queue.admission.max-active-sessions=0")
 class QueueServiceTest extends RedisIntegrationTest {
 
     @Autowired QueueService queueService;

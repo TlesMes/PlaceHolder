@@ -19,7 +19,6 @@ import org.springframework.stereotype.Service;
 public class QueueService {
 
     private final QueueRedisRepository queueRepository;
-    private final QueueAdmissionService admissionService;
     private final EventRepository eventRepository;
 
     /** 입장 속도(초당). 예상 대기시간 = 앞 인원 / rate 계산에 사용. */
@@ -37,14 +36,13 @@ public class QueueService {
     /**
      * 대기열 진입 후 현재 상태를 반환한다. 이미 대기 중이면 순번은 유지된다(ZADD NX).
      *
-     * <p>진입 직후 fast-path로 즉시 입장 1건을 시도한다 — 빈자리가 있으면 다음 스케줄러 틱(최대 1초)을
-     * 기다리지 않고 대기열 맨 앞이 바로 입장한다. 호출자가 맨 앞이면 응답의 {@code admitted=true}로
-     * 즉시 hold 진행이 가능하다. ceiling·rate 판정은 Lua가 원자 처리하므로 스케줄러와 동시 호출돼도 안전.
+     * <p>진입은 enqueue만 한다 — 입장(토큰 발급)은 스케줄러로 일원화한다. 빈자리 즉시 입장(fast-path)은
+     * 이벤트 오픈 정각의 enter 스파이크에 입장 EVAL 부하만 더하고(고부하에선 즉시입장 이득이 없음) 시기상조라
+     * 배제한다. 저부하 프리패스는 이벤트별 가중치 입장 제어(RR/쿼터)가 도입돼 안전망이 갖춰진 뒤 재검토한다.
      */
     public QueueStatusResponse enter(Long eventId, Long userId) {
         requireEventExists(eventId);
         queueRepository.enqueue(eventId, userId, System.currentTimeMillis());
-        admissionService.admitForEvent(eventId, 1);
         return buildStatus(eventId, userId);
     }
 

@@ -140,8 +140,9 @@ admit(eventId, now, ceiling, ratePerSec, ttlMs, max):   // EVAL 1회 = 원자
   return admitted
 
 매 1초(스케줄러): for each active eventId: admit(eventId, ..., max=ratePerSec)
-enter() fast-path:                              admit(eventId, ..., max=1)
 ```
+
+입장(토큰 발급)은 **스케줄러로 일원화**한다. `enter()`는 enqueue만 하고 입장은 하지 않는다 — 빈자리 즉시 입장(fast-path)은 오픈 정각 enter 스파이크에 입장 EVAL 부하만 더하고 고부하에선 즉시입장 이득이 없어 시기상조. 저부하 프리패스는 이벤트별 가중치 입장 제어(RR/쿼터)로 안전망이 갖춰진 뒤 재검토(백로그).
 
 **왜 Lua(원자 연산) — 락 아님:** check-then-act을 EVAL 1회로 묶으면 Redis의 단일 스레드 직렬 실행이 동시 호출을 자동 직렬화한다. 그래서 **다중 인스턴스/스레드(scale-out, fast-path)에서도 ceiling·rate 초과가 불가능**하다. SETNX 분산 락은 같은 효과를 내지만 락 lifetime(크래시 시 미해제, TTL 만료 중 이중 보유) 함정이 있어, 임계구역을 한 원자 연산으로 만드는 Lua를 택한다. 단일 스레드 스케줄러만 있던 이전 설계는 단일 인스턴스에서만 캡이 지켜졌다(다중 인스턴스 시 over-admit).
 
