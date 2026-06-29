@@ -22,9 +22,12 @@ seat:
     scan-interval-ms: 3600000
 
 queue:
-  max-concurrent-holds: 8
   entry-token-ttl-minutes: 5
   admission:
+    # 기본 테스트는 ceiling=rate=8 (단일 틱에서 8명 입장). 다른 값이 필요한 테스트는
+    # @TestPropertySource로 클래스별 오버라이드한다.
+    max-active-sessions: 8
+    rate-per-second: 8
     # 테스트는 QueueAdmissionService.admitWaiting()을 직접 호출해 결정적으로 검증한다.
     # 또한 Redis 없는 컨텍스트(MySQLIntegrationTest)에서 매초 연결 오류가 나지 않도록
     # 자동 발화를 사실상 비활성화한다.
