@@ -1,8 +1,8 @@
 package com.placeholder.domain.queue.service;
 
-import com.placeholder.domain.event.repository.EventRepository;
 import com.placeholder.domain.queue.dto.QueueStatusResponse;
 import com.placeholder.domain.queue.repository.QueueRedisRepository;
+import com.placeholder.global.cache.EventExistenceChecker;
 import com.placeholder.global.exception.custom.EventNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
 public class QueueService {
 
     private final QueueRedisRepository queueRepository;
-    private final EventRepository eventRepository;
+    private final EventExistenceChecker eventExistenceChecker;
 
     /** 입장 속도(초당). 예상 대기시간 = 앞 인원 / rate 계산에 사용. */
     @Value("${queue.admission.rate-per-second:20}")
@@ -81,7 +81,7 @@ public class QueueService {
     }
 
     private void requireEventExists(Long eventId) {
-        if (!eventRepository.existsById(eventId)) {
+        if (!eventExistenceChecker.exists(eventId)) {
             throw new EventNotFoundException("이벤트를 찾을 수 없습니다");
         }
     }
