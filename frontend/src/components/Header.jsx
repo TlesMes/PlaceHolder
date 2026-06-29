@@ -32,9 +32,14 @@ export default function Header() {
                 </Link>
               )}
               {role === 'PROVIDER' && (
-                <Link to="/provider/settlement" className={navLinkClass}>
-                  정산
-                </Link>
+                <>
+                  <Link to="/events/create" className={navLinkClass}>
+                    이벤트 등록
+                  </Link>
+                  <Link to="/provider/settlement" className={navLinkClass}>
+                    정산
+                  </Link>
+                </>
               )}
               <span className="hidden items-center gap-2 text-fg-muted sm:flex">
                 <span className="font-medium text-fg">{email}</span>

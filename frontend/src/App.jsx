@@ -7,9 +7,11 @@ import SignupPage from './pages/SignupPage';
 import LoginPage from './pages/LoginPage';
 import EventListPage from './pages/EventListPage';
 import EventDetailPage from './pages/EventDetailPage';
+import EventCreatePage from './pages/EventCreatePage';
 import CheckoutPage from './pages/CheckoutPage';
 import MyPage from './pages/MyPage';
 import SettlementPage from './pages/SettlementPage';
+import QueueWaitingPage from './pages/QueueWaitingPage';
 
 export default function App() {
   return (
@@ -22,10 +24,26 @@ export default function App() {
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route
+              path="/events/create"
+              element={
+                <ProtectedRoute requiredRole="PROVIDER">
+                  <EventCreatePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/events/:id"
               element={
                 <ProtectedRoute>
                   <EventDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/queue/:id/waiting"
+              element={
+                <ProtectedRoute requiredRole="BOOKER">
+                  <QueueWaitingPage />
                 </ProtectedRoute>
               }
             />
