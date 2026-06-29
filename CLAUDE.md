@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.25 기준)
+## 현재 진행 상황 (2026.06.29 기준)
 
 > 완료 항목은 "무엇을/왜"만 요약. 구현 디테일·근거는 해당 ADR / PR에서 확인.
 
@@ -164,7 +164,7 @@ com.placeholder
   - 부산물: 측정이 가설을 3회 교정(풀=병목→아니다→10미만에선 맞다). **실질 perf 성과는 D-1(N+1)**, D-2는 보조 결론
   - 쿠폰 생성 API(`POST /api/loadtest/coupons`, `@Profile("loadtest")` 전용): 운영엔 빈 없어 404
 
-- **Phase E-1: Redis 대기열** — PR #13 (`feature/queue-redis-implementation`, **PR 오픈 2026-06-27, 미머지**)
+- **Phase E-1: Redis 대기열 (백엔드)** — PR #13 (`feature/queue-redis-implementation`, **머지 완료 2026-06-27**)
   - ADR-013 설계를 구현. **대기열=트래픽 셰이핑만**, 좌석 정합성은 기존 비관적 락(ADR-008)이 유지하는 2층 구조. `queueEnabled=true` 이벤트만 게이트 동작, 비활성·Redis 장애 시 hold 그대로 통과(graceful degradation, 하위호환)
   - 구현: Redis Sorted Set 순번(`enqueue` ZADD NX로 FIFO 보존/`rank`), 입장 토큰(String+TTL, `issueEntryToken`/`hasEntryToken`), hold 게이트(`SeatService.enforceQueueAdmission` — 락 잡기 전 비잠금 projection으로 fast-fail), 배치 입장 스케줄러(얇은 `QueueAdmissionScheduler` → `QueueAdmissionService.admitWaiting` ZPOPMIN)
   - **`current_held_count`를 "유효 입장 토큰 수"(SCAN)로 구체화:** HELD 좌석 수로 세면 토큰만 받고 hold 전인 in-flight가 누락돼 한 틱 내 과다 입장 → 토큰 자체를 셈
@@ -172,12 +172,19 @@ com.placeholder
   - **게이트(3단계)와 스케줄러(4단계)는 분리 불가** — 토큰 발급 주체 없으면 queueEnabled 이벤트 영구 입장 거부 → 단일 PR로 묶음
   - 한계: 대기열 **필요성 자체는 미입증**(D-2 생성기 병목). 이 PR은 "필요해서"가 아니라 **설계안을 구현으로 증명**하는 포트폴리오 단위
 
+- **Phase E-1: 프론트엔드 + 입장 제어 재설계** — PR #14 (`feature/queue-redis-implementation`, **오픈 2026-06-29, 미머지**)
+  - **프론트엔드:** 대기실 페이지(`QueueWaitingPage`, 동적 폴링), EventDetail 입장 게이트 분기(queueEnabled면 대기열 입장), EventCreatePage + `queueEnabled` 토글, api/queue.js, 라우팅·헤더
+  - **입장 제어 재설계(핵심):** 기존 `max-concurrent-holds`(이벤트별, DB 풀 사이징=단위 오류) → **전역 `max-active-sessions`(ceiling, 앱 세션 용량) + `rate-per-second`(초당 입장)** 두 레버. check-then-act(활성수 확인→ZPOPMIN→토큰 발급)을 **`admit.lua` EVAL 1회로 원자화** → 다중 인스턴스/스레드 동시 호출에도 캡 초과·중복 입장 불가(락 없이 상호배제). 활성 세션은 `active:all` ZSET(만료 score), rate는 `rate:{epochSec}` 버킷
+  - **입장은 스케줄러 일원화:** `enter()`는 enqueue만. enter fast-path(빈자리 즉시입장)는 추가했다 **제거(시기상조)** — 고부하 전제라 이득 없고 오픈 정각 스파이크에 EVAL 부하만 더함
+  - **동적 폴링:** status 응답 `nextPollDelayMs = clamp(앞인원/rate, min, max)` → 대기실 폴링 부하 완화(앞쪽 촘촘/뒤쪽 성김)
+  - 테스트 76 통과(큐: 원자 ceiling 정확성·rate 윈도 캡·초과→이탈→대기순 −1·동적 폴링). E2E 브라우저 검증(대기실→ceiling 가득 대기→해제 시 자동 입장 리다이렉트)
+
 ### 현재 상태
-- **작업 브랜치:** `feature/queue-redis-implementation` (E-1, PR #13 리뷰 대기 중)
-- **마지막 main 커밋:** `Merge pull request #7` (c724960)
-  - PR #1~7, #8, #5, #9, #10, #11 머지 완료. D-2(PR #7) 2026-06-23 머지
+- **작업 브랜치:** `feature/queue-redis-implementation` (E-1 후속, **PR #14 리뷰 대기 중**)
+- **마지막 main 커밋:** `Merge pull request #13` (b359faa)
+  - PR #1~11, #13 머지 완료. E-1 백엔드(#13) 2026-06-27 머지
   - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종)까지 완료
-  - **E-1(PR #13) 오픈, 머지 대기.** 머지 후 `main` 복귀 + 이 섹션 갱신 필요
+  - **E-1 프론트+입장재설계(PR #14) 오픈, 머지 대기.** 머지 후 이 섹션 갱신 필요
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -188,14 +195,25 @@ com.placeholder
   - **GET /api/reservations/my** - 내 예약 내역 (BOOKER) ★ E-3
   - **GET /api/points/history** - 포인트 이력 cursor 페이징 (BOOKER/PROVIDER) ★ E-3
   - **GET /api/providers/my/settlement** - 정산 잔액 + SETTLE 거래 목록 (PROVIDER) ★ E-3
+  - **POST /api/queue/{eventId}/enter** - 대기열 진입(순번 반환) (BOOKER) ★ E-1
+  - **GET /api/queue/{eventId}/status** - 순번·대기 인원·입장 여부·nextPollDelayMs (BOOKER) ★ E-1
   - POST /api/loadtest/coupons - 쿠폰 생성 (**loadtest 프로파일 전용**, 운영 404)
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **E-1 PR #13 머지:** self review 후 머지 → main 복귀. (설계 ADR-013 + 구현 5단계 + 테스트 완료, PR 오픈 상태)
-2. **(선택) 경합/지속과부하 시나리오 측정:** D-1 대기열 필요성을 실측으로 입증하려면 부하생성기 별도 머신 + 핫좌석 경합 부하 필요. E-1 착수 전후 어느 쪽이든 가능 — 백로그
-3. **정산 조회 cursor 페이징(측정 선행)**: `docs/performance/settlement-query-scalability.md` 백로그 — 정산 건수 증가 응답 곡선 측정 후 도입 판단
-4. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
+1. **PR #14 self review 후 머지** → main 복귀 + 이 섹션 갱신. (프론트 + 입장 제어 재설계 + 동적 폴링, 테스트 76 통과)
+2. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
+
+### 백로그 — 대기열 (우선순위 순, 다음 세션 이어가기용)
+> PR #14에서 E-1 입장 제어를 다듬으며 식별. 지금은 단일 인스턴스·단일 핫이벤트 전제로 충분.
+> **다음 세션 시작점: 1번(작고 독립적, 방금 논의한 스파이크 직접 방어).**
+1. **`enter()` `existsById` 캐싱** — 진입마다 MySQL `existsById` → 오픈 정각 스파이크가 보호 대상 DB·풀로 직행. 활성 이벤트 id 캐시/부팅 검증으로 전환. *작음·독립·즉효.*
+2. **confirm 시 입장 토큰 반환** — 성공/이탈 유저 토큰이 TTL(5분)까지 ceiling 슬롯 점유(유령 세션) → 구매 완료 시 즉시 회수로 처리량 개선. *작음.*
+3. **이벤트별 가중치 입장 제어(RR/쿼터) + 저부하 프리패스** — 현재 ceiling·rate는 **전역**이라 핫 이벤트가 전역 rate를 독식해 다른 이벤트가 굶을(starvation) 수 있음. 전역 캡 아래 이벤트별 공정 분배 도입, 그 안전망 위에서 enter 프리패스 재검토(키 분리 아님 — 전역은 의도된 설계). *큰 단위·동시성 showcase.*
+4. **대기열 필요성 실측** — D-2는 생성기 병목으로 미입증. 부하생성기 별도 머신 + 핫좌석 경합 부하로 지속 과부하 구간 측정. *인프라 의존(별도 머신).*
+
+### 백로그 — 기타
+- **정산 조회 cursor 페이징(측정 선행):** `/providers/my/settlement` 전건 반환 → 건수 증가 응답 곡선 측정 후 도입 판단. `docs/performance/settlement-query-scalability.md`
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
