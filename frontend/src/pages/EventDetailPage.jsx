@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getEventDetail } from '../api/events';
 import { holdSeat } from '../api/seats';
+import { enterQueue } from '../api/queue';
 import { useSeatPolling } from '../hooks/useSeatPolling';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -59,6 +60,24 @@ export default function EventDetailPage() {
     }
   };
 
+  // queueEnabled 이벤트: 대기열 진입 후 대기실로 이동.
+  const handleEnterQueue = async () => {
+    setBusy(true);
+    try {
+      const res = await enterQueue(id);
+      if (res.data.admitted) {
+        // 이미 입장 토큰 보유 → 바로 hold 진행
+        await handleHold();
+      } else {
+        navigate(`/queue/${id}/waiting`);
+      }
+    } catch (err) {
+      toast.error(toMessage(err, '대기열 진입에 실패했습니다.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (eventError) {
     return (
       <Layout>
@@ -84,7 +103,14 @@ export default function EventDetailPage() {
       ) : (
         <>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold tracking-tight text-fg">{event.title}</h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight text-fg">{event.title}</h1>
+              {event.queueEnabled && (
+                <span className="rounded-full bg-warning-soft px-2.5 py-0.5 text-xs font-medium text-warning-soft-fg">
+                  대기열 이벤트
+                </span>
+              )}
+            </div>
             <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-fg-muted">
               <span className="flex items-center gap-1.5">
                 <span aria-hidden>📍</span>
@@ -134,13 +160,23 @@ export default function EventDetailPage() {
               <span className="font-semibold text-fg">{selectedSeat.label}</span>
               <span className="text-fg-muted"> · {formatPrice(selectedSeat.price)} 선택됨</span>
             </div>
-            <button
-              onClick={handleHold}
-              disabled={busy}
-              className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover disabled:opacity-60"
-            >
-              {busy ? '처리 중…' : '홀드하고 결제하기'}
-            </button>
+            {event?.queueEnabled ? (
+              <button
+                onClick={handleEnterQueue}
+                disabled={busy}
+                className="rounded-lg bg-warning px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+              >
+                {busy ? '처리 중…' : '대기열 입장하기'}
+              </button>
+            ) : (
+              <button
+                onClick={handleHold}
+                disabled={busy}
+                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover disabled:opacity-60"
+              >
+                {busy ? '처리 중…' : '홀드하고 결제하기'}
+              </button>
+            )}
           </div>
         </div>
       )}

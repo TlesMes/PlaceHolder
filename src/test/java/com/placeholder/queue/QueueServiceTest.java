@@ -3,6 +3,7 @@ package com.placeholder.queue;
 import com.placeholder.domain.event.entity.Event;
 import com.placeholder.domain.event.repository.EventRepository;
 import com.placeholder.domain.queue.dto.QueueStatusResponse;
+import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.queue.service.QueueService;
 import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
@@ -36,22 +37,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * </ul>
  *
  * <p>싱글톤 Redis 컨테이너는 JVM 전체에서 키를 공유하므로, 테스트마다 keys 패턴으로 정리한다.
+ *
+ * <p>enter()는 enqueue만 하고 입장은 스케줄러가 담당하므로, 진입 직후 status는 항상 대기 상태(admitted=false)다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
 class QueueServiceTest extends RedisIntegrationTest {
 
     @Autowired QueueService queueService;
+    @Autowired QueueRedisRepository queueRepository;
     @Autowired EventRepository eventRepository;
     @Autowired UserRepository userRepository;
     @Autowired StringRedisTemplate redis;
 
     @AfterEach
     void flushQueueKeys() {
-        var keys = redis.keys("queue:*");
-        if (keys != null && !keys.isEmpty()) {
-            redis.delete(keys);
-        }
+        deleteByPattern("queue:*");
+        deleteByPattern("entry:*");
+        deleteByPattern("rate:*");
+        redis.delete("active:all");
+    }
+
+    private void deleteByPattern(String pattern) {
+        var keys = redis.keys(pattern);
+        if (keys != null && !keys.isEmpty()) redis.delete(keys);
     }
 
     @Test
@@ -116,6 +125,23 @@ class QueueServiceTest extends RedisIntegrationTest {
 
         assertThatThrownBy(() -> queueService.enter(999_999L, userId))
                 .isInstanceOf(EventNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("nextPollDelayMs: 앞 인원/rate 예상 대기시간을 [min,max]로 클램프")
+    void status_nextPollDelay_scalesWithPosition() {
+        Long eventId = persistEvent().getId();
+        // 합성 id로 81명 대기열 구성 (ceiling=0이라 입장 없음). test rate=8, min=2000, max=10000.
+        for (long u = 1; u <= 81; u++) {
+            queueRepository.enqueue(eventId, u, 1_000L + u);
+        }
+
+        // 맨 앞(ahead 0) → 0ms → 하한 2000으로 클램프
+        assertThat(queueService.status(eventId, 1L).getNextPollDelayMs()).isEqualTo(2000L);
+        // ahead 40 → 40*1000/8 = 5000 (범위 내)
+        assertThat(queueService.status(eventId, 41L).getNextPollDelayMs()).isEqualTo(5000L);
+        // ahead 80 → 80*1000/8 = 10000 (상한 경계)
+        assertThat(queueService.status(eventId, 81L).getNextPollDelayMs()).isEqualTo(10000L);
     }
 
     // --- 셋업 헬퍼 ---

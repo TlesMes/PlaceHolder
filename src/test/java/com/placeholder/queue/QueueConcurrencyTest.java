@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("test")
 class QueueConcurrencyTest extends RedisIntegrationTest {
 
-    private static final int CAPACITY = 8; // test 프로파일 queue.max-concurrent-holds
+    private static final int CAPACITY = 8; // test 프로파일 queue.admission.max-active-sessions (=rate-per-second)
 
     @Autowired QueueAdmissionService admissionService;
     @Autowired QueueRedisRepository queueRepository;
@@ -63,10 +63,15 @@ class QueueConcurrencyTest extends RedisIntegrationTest {
 
     @AfterEach
     void flush() {
-        var keys = redis.keys("queue:*");
+        deleteByPattern("queue:*");
+        deleteByPattern("entry:*");
+        deleteByPattern("rate:*");
+        redis.delete("active:all");
+    }
+
+    private void deleteByPattern(String pattern) {
+        var keys = redis.keys(pattern);
         if (keys != null && !keys.isEmpty()) redis.delete(keys);
-        var tokens = redis.keys("entry:*");
-        if (tokens != null && !tokens.isEmpty()) redis.delete(tokens);
     }
 
     @Test
@@ -94,7 +99,8 @@ class QueueConcurrencyTest extends RedisIntegrationTest {
         }
         assertThat(tokenCount + queued).isEqualTo(waiting);          // 유실 없음
         assertThat(queueRepository.size(eventId)).isEqualTo(queued); // 대기열 크기 일치
-        assertThat(tokenCount).isBetween(CAPACITY, waiting);         // 최소 한 배치(슬롯)는 입장
+        // Lua 원자 입장 → ceiling 초과 불가. 동시 12스레드여도 정확히 CAPACITY명만 입장(over-admit 없음).
+        assertThat(tokenCount).isEqualTo(CAPACITY);
     }
 
     @Test

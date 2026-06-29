@@ -119,20 +119,34 @@ member: userId
 - Hold API 진입 시 이 토큰 존재 여부 확인 → 없으면 대기열로 리다이렉트
 - 토큰 TTL = 홀드 TTL(5분)과 동일 — 토큰 만료 후 홀드를 시도하면 대기열 재진입
 
-### 배치 입장 스케줄러
+### 배치 입장 스케줄러 — Lua 원자 입장 (ceiling + rate)
+
+입장 제어는 두 레버를 함께 쓴다(현업 대기실 표준).
+- **ceiling (C):** 동시 활성 세션(입장 토큰 보유) **전역** 상한. 막는 대상은 *이벤트*가 아니라 *인스턴스 용량*이므로 이벤트 수와 무관한 전역 값이다(앱 세션 용량 기준 — DB 풀 크기 아님).
+- **rate (R):** 초당 입장 허용 수. 빈자리가 한꺼번에 생겨도 유입을 평탄화한다.
+
+핵심 연산(활성 수 확인 → ZPOPMIN → 토큰 발급)은 **Lua 스크립트(`admit.lua`)로 원자화**한다.
 
 ```
-매 1초마다:
-  for each active eventId:
-    available_slots = max_concurrent_holds - current_held_count(eventId)
-    if available_slots > 0:
-      users = ZPOPMIN queue:{eventId} available_slots
-      for user in users:
-        SET entry:{eventId}:{user} 1 EX 300  // TTL 5분
-        notify(user, "입장 가능")             // SSE or 폴링
+admit(eventId, now, ceiling, ratePerSec, ttlMs, max):   // EVAL 1회 = 원자
+  ZREMRANGEBYSCORE active:all 0 now          // 만료 활성 청소
+  while admitted < max:
+    if ZCARD active:all >= ceiling: break              // C
+    if GET rate:{now/1000} >= ratePerSec: break        // R
+    user = ZPOPMIN queue:{eventId} 1; if none: break
+    INCR rate:{now/1000}; EXPIRE rate:{...} 2
+    ZADD active:all (now+ttlMs) "{eventId}:{user}"      // 활성 등록
+    SET entry:{eventId}:{user} 1 PX ttlMs               // 게이트용 토큰
+  return admitted
+
+매 1초(스케줄러): for each active eventId: admit(eventId, ..., max=ratePerSec)
 ```
 
-`max_concurrent_holds`는 D-2 knee point 수치 기반으로 설정한다(초기값: 커넥션 풀 크기 × 0.8 = 8).
+입장(토큰 발급)은 **스케줄러로 일원화**한다. `enter()`는 enqueue만 하고 입장은 하지 않는다 — 빈자리 즉시 입장(fast-path)은 오픈 정각 enter 스파이크에 입장 EVAL 부하만 더하고 고부하에선 즉시입장 이득이 없어 시기상조. 저부하 프리패스는 이벤트별 가중치 입장 제어(RR/쿼터)로 안전망이 갖춰진 뒤 재검토(백로그).
+
+**왜 Lua(원자 연산) — 락 아님:** check-then-act을 EVAL 1회로 묶으면 Redis의 단일 스레드 직렬 실행이 동시 호출을 자동 직렬화한다. 그래서 **다중 인스턴스/스레드(scale-out, fast-path)에서도 ceiling·rate 초과가 불가능**하다. SETNX 분산 락은 같은 효과를 내지만 락 lifetime(크래시 시 미해제, TTL 만료 중 이중 보유) 함정이 있어, 임계구역을 한 원자 연산으로 만드는 Lua를 택한다. 단일 스레드 스케줄러만 있던 이전 설계는 단일 인스턴스에서만 캡이 지켜졌다(다중 인스턴스 시 over-admit).
+
+**왜 ceiling이 전역인가:** 이전 `max_concurrent_holds`는 입장 토큰(TTL 5분) 수를 *이벤트별*로 세며 값을 DB 풀(8)에 맞췄다 → 사실상 "5분에 8명"이라는 비현실적 입장 속도 + 이벤트 N개면 8N으로 인스턴스 용량 초과. hold는 짧은 트랜잭션(C-1: 락→상태변경→즉시 커밋)이라 풀이 막을 건 "동시 hold 트랜잭션"이지 "5분 토큰"이 아니다. 그래서 ceiling은 앱 세션 용량 기준의 전역 값으로 두고, rate를 별도 레버로 분리한다. 초기값은 운영 측정으로 조정(`max-active-sessions`, `rate-per-second`).
 
 ### 대기 상태 조회 API
 

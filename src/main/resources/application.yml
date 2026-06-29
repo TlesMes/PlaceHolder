@@ -34,12 +34,18 @@ seat:
     scan-interval-ms: 60000   # 만료된 HELD 좌석 스캔 주기(ms). 스케줄러가 AVAILABLE로 해제
 
 queue:
-  # 이벤트별 동시 입장 가능 인원(in-flight 입장 토큰 상한). ADR-013 초기값: 풀 크기 10 × 0.8 = 8
-  max-concurrent-holds: 8
   # 입장 토큰 TTL(분). 홀드 TTL(5분)과 동일 — 만료 후 hold 시도 시 대기열 재진입
   entry-token-ttl-minutes: 5
   admission:
-    scan-interval-ms: 1000   # 배치 입장 스케줄러 주기(ms). 슬롯 여유분만큼 대기열 → 입장 토큰 발급
+    # 동시 활성 세션(입장 토큰 보유) 전역 상한 (C). DB 풀이 아니라 앱 세션 용량 기준 — ADR-013.
+    max-active-sessions: 200
+    # 초당 입장 허용 수 전역 상한 (R). 유입 스파이크 평탄화.
+    rate-per-second: 20
+    scan-interval-ms: 1000   # 배치 입장 스케줄러 주기(ms). ceiling·rate 한도 내 대기열 → 입장 토큰 발급
+  status:
+    # 동적 폴링 주기 범위(ms). 서버가 (앞 인원 / rate) 예상 대기시간을 이 범위로 클램프해 내려준다.
+    min-poll-ms: 2000
+    max-poll-ms: 10000
 
 jwt:
   secret: ${JWT_SECRET:placeholder-dev-secret-key-must-be-at-least-32-bytes!!}
