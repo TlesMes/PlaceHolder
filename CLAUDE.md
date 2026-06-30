@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.29 기준)
+## 현재 진행 상황 (2026.06.30 기준)
 
 > 완료 항목은 "무엇을/왜"만 요약. 구현 디테일·근거는 해당 ADR / PR에서 확인.
 
@@ -172,19 +172,26 @@ com.placeholder
   - **게이트(3단계)와 스케줄러(4단계)는 분리 불가** — 토큰 발급 주체 없으면 queueEnabled 이벤트 영구 입장 거부 → 단일 PR로 묶음
   - 한계: 대기열 **필요성 자체는 미입증**(D-2 생성기 병목). 이 PR은 "필요해서"가 아니라 **설계안을 구현으로 증명**하는 포트폴리오 단위
 
-- **Phase E-1: 프론트엔드 + 입장 제어 재설계** — PR #14 (`feature/queue-redis-implementation`, **오픈 2026-06-29, 미머지**)
+- **Phase E-1: 프론트엔드 + 입장 제어 재설계** — PR #14 (`feature/queue-redis-implementation`, **머지 완료 2026-06-29**)
   - **프론트엔드:** 대기실 페이지(`QueueWaitingPage`, 동적 폴링), EventDetail 입장 게이트 분기(queueEnabled면 대기열 입장), EventCreatePage + `queueEnabled` 토글, api/queue.js, 라우팅·헤더
   - **입장 제어 재설계(핵심):** 기존 `max-concurrent-holds`(이벤트별, DB 풀 사이징=단위 오류) → **전역 `max-active-sessions`(ceiling, 앱 세션 용량) + `rate-per-second`(초당 입장)** 두 레버. check-then-act(활성수 확인→ZPOPMIN→토큰 발급)을 **`admit.lua` EVAL 1회로 원자화** → 다중 인스턴스/스레드 동시 호출에도 캡 초과·중복 입장 불가(락 없이 상호배제). 활성 세션은 `active:all` ZSET(만료 score), rate는 `rate:{epochSec}` 버킷
   - **입장은 스케줄러 일원화:** `enter()`는 enqueue만. enter fast-path(빈자리 즉시입장)는 추가했다 **제거(시기상조)** — 고부하 전제라 이득 없고 오픈 정각 스파이크에 EVAL 부하만 더함
   - **동적 폴링:** status 응답 `nextPollDelayMs = clamp(앞인원/rate, min, max)` → 대기실 폴링 부하 완화(앞쪽 촘촘/뒤쪽 성김)
   - 테스트 76 통과(큐: 원자 ceiling 정확성·rate 윈도 캡·초과→이탈→대기순 −1·동적 폴링). E2E 브라우저 검증(대기실→ceiling 가득 대기→해제 시 자동 입장 리다이렉트)
 
+- **Phase E-1: enter/status 이벤트 존재 검증 캐싱** — PR #15 (`feature/cache-event-exists`, **머지 완료 2026-06-30**)
+  - `QueueService.requireEventExists`(enter·status 공용)의 `eventRepository.existsById`가 매 요청 MySQL 직격 → 대기열이 보호해야 할 DB로 오픈 정각 스파이크가 직행하던 자기모순 제거
+  - **read-through Caffeine 캐시**(`eventExists`, TTL 60s `expireAfterWrite`/maxSize 1000). 존재 검증을 별도 빈 `EventExistenceChecker`로 분리 — `@Cacheable`이 self-invocation으로 무력화되는 함정 회피. `@Cacheable(unless="#result==false")` **양성만 캐싱**(미존재 캐싱 시 신규 생성 이벤트 404 고착 방지)
+  - **`sync=true`는 `unless`와 양립 불가** → 스탬피드 방지(sync) 포기, 기능 정합성(양성 캐싱) 우선. 잔존 스탬피드(오픈 첫 ms·60초 만료 순간 동시 미스)는 초경량 PK 조회라 수용. ADR-014
+  - 테스트: `QueueServiceTest` +2(`@MockitoSpyBean`으로 DB 조회 횟수 검증 — 캐시 히트 1회/미존재 uncached). 프로젝트 표준 `@MockitoSpyBean` 사용(deprecated `@SpyBean` 아님)
+  - ⚠️ **효과 미측정** — existsById가 실제 병목이었다는 증거 없음(PK 단건은 경량). "측정된 성능 개선"이 아니라 **"구조적 결함 제거 + 저비용 보강"** 의 의사결정(ADR-013/D-2 정직성 기준 동일)
+
 ### 현재 상태
-- **작업 브랜치:** `feature/queue-redis-implementation` (E-1 후속, **PR #14 리뷰 대기 중**)
-- **마지막 main 커밋:** `Merge pull request #13` (b359faa)
-  - PR #1~11, #13 머지 완료. E-1 백엔드(#13) 2026-06-27 머지
-  - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종)까지 완료
-  - **E-1 프론트+입장재설계(PR #14) 오픈, 머지 대기.** 머지 후 이 섹션 갱신 필요
+- **작업 브랜치:** `main` (E-1 일단락, 다음 작업 미착수)
+- **마지막 main 커밋:** `Merge pull request #15` (5960f2f)
+  - PR #1~11, #13~15 머지 완료
+  - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종) 완료
+  - **E-1 대기열 전 구간 머지 완료:** 백엔드(#13, 06-27) + 프론트·입장재설계(#14, 06-29) + enter/status 캐싱(#15, 06-30, ADR-014)
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -201,16 +208,15 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **PR #14 self review 후 머지** → main 복귀 + 이 섹션 갱신. (프론트 + 입장 제어 재설계 + 동적 폴링, 테스트 76 통과)
-2. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
+1. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
+2. 대기열 백로그(아래) 중 택1 — **다음 세션 시작점: confirm 시 입장 토큰 반환(작고 독립적).**
 
 ### 백로그 — 대기열 (우선순위 순, 다음 세션 이어가기용)
 > PR #14에서 E-1 입장 제어를 다듬으며 식별. 지금은 단일 인스턴스·단일 핫이벤트 전제로 충분.
-> **다음 세션 시작점: 1번(작고 독립적, 방금 논의한 스파이크 직접 방어).**
-1. **`enter()` `existsById` 캐싱** — 진입마다 MySQL `existsById` → 오픈 정각 스파이크가 보호 대상 DB·풀로 직행. 활성 이벤트 id 캐시/부팅 검증으로 전환. *작음·독립·즉효.*
-2. **confirm 시 입장 토큰 반환** — 성공/이탈 유저 토큰이 TTL(5분)까지 ceiling 슬롯 점유(유령 세션) → 구매 완료 시 즉시 회수로 처리량 개선. *작음.*
-3. **이벤트별 가중치 입장 제어(RR/쿼터) + 저부하 프리패스** — 현재 ceiling·rate는 **전역**이라 핫 이벤트가 전역 rate를 독식해 다른 이벤트가 굶을(starvation) 수 있음. 전역 캡 아래 이벤트별 공정 분배 도입, 그 안전망 위에서 enter 프리패스 재검토(키 분리 아님 — 전역은 의도된 설계). *큰 단위·동시성 showcase.*
-4. **대기열 필요성 실측** — D-2는 생성기 병목으로 미입증. 부하생성기 별도 머신 + 핫좌석 경합 부하로 지속 과부하 구간 측정. *인프라 의존(별도 머신).*
+1. **confirm 시 입장 토큰 반환** — 성공/이탈 유저 토큰이 TTL(5분)까지 ceiling 슬롯 점유(유령 세션) → 구매 완료 시 즉시 회수로 처리량 개선. *작음.* ← **다음 세션 시작점**
+2. **이벤트별 가중치 입장 제어(RR/쿼터) + 저부하 프리패스** — 현재 ceiling·rate는 **전역**이라 핫 이벤트가 전역 rate를 독식해 다른 이벤트가 굶을(starvation) 수 있음. 전역 캡 아래 이벤트별 공정 분배 도입, 그 안전망 위에서 enter 프리패스 재검토(키 분리 아님 — 전역은 의도된 설계). *큰 단위·동시성 showcase.*
+3. **대기열 필요성 실측** — D-2는 생성기 병목으로 미입증. 부하생성기 별도 머신 + 핫좌석 경합 부하로 지속 과부하 구간 측정. *인프라 의존(별도 머신).*
+4. **enter/status 캐싱 효과 실측** — PR #15(ADR-014)는 효과 미측정. 캐시 on/off로 existsById 쿼리 수·커넥션 점유 비교(생성기 분리 필요). *3번과 함께 묶을 수 있음.*
 
 ### 백로그 — 기타
 - **정산 조회 cursor 페이징(측정 선행):** `/providers/my/settlement` 전건 반환 → 건수 증가 응답 곡선 측정 후 도입 판단. `docs/performance/settlement-query-scalability.md`
