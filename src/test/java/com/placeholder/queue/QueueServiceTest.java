@@ -7,15 +7,19 @@ import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.queue.service.QueueService;
 import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
+import com.placeholder.global.cache.EventExistenceChecker;
 import com.placeholder.global.exception.custom.EventNotFoundException;
 import com.placeholder.support.RedisIntegrationTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -49,13 +53,17 @@ class QueueServiceTest extends RedisIntegrationTest {
     @Autowired EventRepository eventRepository;
     @Autowired UserRepository userRepository;
     @Autowired StringRedisTemplate redis;
+    @Autowired CacheManager cacheManager;
+    @MockitoSpyBean EventExistenceChecker eventExistenceChecker;
 
     @AfterEach
-    void flushQueueKeys() {
+    void cleanup() {
         deleteByPattern("queue:*");
         deleteByPattern("entry:*");
         deleteByPattern("rate:*");
         redis.delete("active:all");
+        cacheManager.getCache("eventExists").clear();
+        Mockito.reset(eventExistenceChecker);
     }
 
     private void deleteByPattern(String pattern) {
@@ -125,6 +133,33 @@ class QueueServiceTest extends RedisIntegrationTest {
 
         assertThatThrownBy(() -> queueService.enter(999_999L, userId))
                 .isInstanceOf(EventNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("이벤트 존재 확인: enter 두 번 호출해도 existsById DB 조회는 1회 (캐시 히트)")
+    void enter_eventExistsCached_afterFirstHit() {
+        Long eventId = persistEvent().getId();
+        Long userId = persistBooker().getId();
+
+        queueService.enter(eventId, userId);  // 1차: DB 조회 → 캐시 저장
+        queueService.enter(eventId, userId);  // 2차: 캐시 히트, DB 조회 없음
+
+        Mockito.verify(eventExistenceChecker, Mockito.times(1)).exists(eventId);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 이벤트: 캐시 미저장 — 재시도 시 여전히 DB 조회")
+    void enter_nonExistent_notCached() {
+        Long userId = persistBooker().getId();
+        long bogusId = 999_998L;
+
+        assertThatThrownBy(() -> queueService.enter(bogusId, userId))
+                .isInstanceOf(EventNotFoundException.class);
+        assertThatThrownBy(() -> queueService.enter(bogusId, userId))
+                .isInstanceOf(EventNotFoundException.class);
+
+        // false는 캐시 저장 안 하므로(unless) 두 번 모두 DB 조회
+        Mockito.verify(eventExistenceChecker, Mockito.times(2)).exists(bogusId);
     }
 
     @Test
