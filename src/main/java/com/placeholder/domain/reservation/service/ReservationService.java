@@ -7,6 +7,7 @@ import com.placeholder.domain.point.entity.PointTransaction.TransactionType;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
 import com.placeholder.domain.provider.entity.ProviderAccount;
 import com.placeholder.domain.provider.repository.ProviderAccountRepository;
+import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.reservation.dto.MyReservationsResponse;
 import com.placeholder.domain.reservation.dto.ReservationConfirmResponse;
 import com.placeholder.domain.reservation.entity.Reservation;
@@ -21,13 +22,18 @@ import com.placeholder.global.exception.custom.SeatNotFoundException;
 import com.placeholder.global.exception.custom.SeatNotHeldByUserException;
 import com.placeholder.global.exception.custom.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 @SuppressWarnings("null")
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -39,6 +45,7 @@ public class ReservationService {
     private final ReservationRepository reservationRepository;
     private final PointTransactionRepository pointTransactionRepository;
     private final UserRepository userRepository;
+    private final QueueRedisRepository queueRedisRepository;
 
     @Transactional
     public ReservationConfirmResponse confirmReservation(Long seatId, Long bookerId) {
@@ -90,6 +97,23 @@ public class ReservationService {
                 .amount(price)
                 .reservation(savedReservation)
                 .build());
+
+        // 8. 커밋 성공 시에만 대기열 입장 토큰 회수 — 구매 완료 유저가 잔여 TTL 동안 ceiling 슬롯을
+        //    점유(유령 세션)하지 않도록 즉시 반환. 트랜잭션 안에서 바로 지우면 이후 커밋 실패 시
+        //    "결제는 안 됐는데 토큰만 잃는" 역전이 생기므로 afterCommit으로 미룬다(롤백 시 미실행 = 토큰 보존).
+        Long eventId = seat.getEvent().getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    queueRedisRepository.releaseEntryToken(eventId, bookerId);
+                } catch (DataAccessException e) {
+                    // Redis 장애가 confirm 결과를 바꾸면 안 됨 — 회수 실패 시 TTL이 안전망 (ADR-013 degradation)
+                    log.warn("입장 토큰 회수 실패 — TTL 만료로 자연 회수 예정 (eventId={}, userId={})",
+                            eventId, bookerId, e);
+                }
+            }
+        });
 
         return ReservationConfirmResponse.builder()
                 .reservationId(reservation.getId())
