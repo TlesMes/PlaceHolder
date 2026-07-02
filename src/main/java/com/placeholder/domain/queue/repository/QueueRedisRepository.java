@@ -106,6 +106,16 @@ public class QueueRedisRepository {
         return Boolean.TRUE.equals(redis.hasKey(entryTokenKey(eventId, userId)));
     }
 
+    /**
+     * 입장 토큰 회수 — {@link #issueEntryToken}의 역연산. 세션 종료가 확실한 시점(confirm)에 호출해,
+     * 구매를 끝낸 유저가 잔여 TTL 동안 ceiling 슬롯을 점유하는 유령 세션을 즉시 제거한다.
+     * 없는 키/멤버에는 no-op(멱등)이라 queueEnabled 여부와 무관하게 호출해도 무해하다.
+     */
+    public void releaseEntryToken(Long eventId, Long userId) {
+        redis.opsForZSet().remove(ACTIVE_ALL_KEY, activeMember(eventId, userId));
+        redis.delete(entryTokenKey(eventId, userId));
+    }
+
     /** 현재 유효한 전역 활성 세션 수(만료 score 제외). ceiling 검증/관측용. */
     public long activeCount() {
         Long c = redis.opsForZSet()
