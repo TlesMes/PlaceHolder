@@ -208,8 +208,8 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **(병렬 진행 중) CI 파이프라인:** GitHub Actions build+test — 별도 세션/브랜치 `feature/ci-github-actions`
-2. 대기열 백로그(아래) 중 택1 — **다음 세션 시작점: confirm 시 입장 토큰 반환(작고 독립적).**
+> **정정(2026-06-30):** CI 파이프라인(PR #12)은 이미 머지 완료 — 직전 갱신에서 "병렬 진행 중"으로 잘못 이어적음. 전 브랜치 확인 결과 열린 PR·진행 중 작업 없음.
+1. 대기열 백로그(아래) 중 택1 — **다음 세션 시작점: confirm 시 입장 토큰 반환(작고 독립적).**
 
 ### 백로그 — 대기열 (우선순위 순, 다음 세션 이어가기용)
 > PR #14에서 E-1 입장 제어를 다듬으며 식별. 지금은 단일 인스턴스·단일 핫이벤트 전제로 충분.
