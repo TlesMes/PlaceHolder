@@ -83,6 +83,15 @@ public class QueueRedisRepository {
         return redis.opsForZSet().rank(queueKey(eventId), String.valueOf(userId));
     }
 
+    /**
+     * 대기열에서 제거(이탈). 대기열 ZSET에는 TTL이 없어 이탈자를 지우지 않으면 순번이 됐을 때
+     * 유령에게 토큰이 발급되므로, 입장 전 이탈은 이 메서드로 정리한다. 없으면 no-op(멱등).
+     */
+    public boolean dequeue(Long eventId, Long userId) {
+        Long removed = redis.opsForZSet().remove(queueKey(eventId), String.valueOf(userId));
+        return removed != null && removed > 0;
+    }
+
     /** 전체 대기 인원. */
     public long size(Long eventId) {
         Long count = redis.opsForZSet().zCard(queueKey(eventId));
