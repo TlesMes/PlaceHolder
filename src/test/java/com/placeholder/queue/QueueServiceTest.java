@@ -163,6 +163,21 @@ class QueueServiceTest extends RedisIntegrationTest {
     }
 
     @Test
+    @DisplayName("토큰 보유자의 enter: 재enqueue 없이 상태만 반환 (토큰 XOR 대기 불변식)")
+    void enter_tokenHolder_notReEnqueued() {
+        Long eventId = persistEvent().getId();
+        Long userId = persistBooker().getId();
+        queueRepository.issueEntryToken(eventId, userId, java.time.Duration.ofMinutes(5));
+
+        QueueStatusResponse res = queueService.enter(eventId, userId);
+
+        assertThat(res.isAdmitted()).isTrue();
+        assertThat(res.getPosition()).isNull();                          // 대기열에 안 들어감
+        assertThat(queueRepository.rank(eventId, userId)).isNull();     // 유령 멤버 없음
+        assertThat(queueRepository.size(eventId)).isZero();
+    }
+
+    @Test
     @DisplayName("nextPollDelayMs: 앞 인원/rate 예상 대기시간을 [min,max]로 클램프")
     void status_nextPollDelay_scalesWithPosition() {
         Long eventId = persistEvent().getId();
