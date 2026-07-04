@@ -42,7 +42,12 @@ public class QueueService {
      */
     public QueueStatusResponse enter(Long eventId, Long userId) {
         requireEventExists(eventId);
-        queueRepository.enqueue(eventId, userId, System.currentTimeMillis());
+        // 불변식: 입장 토큰 보유 XOR 대기열 대기. 토큰 보유자를 재enqueue하면 대기열에 유령
+        // 멤버가 남고, 나중에 스케줄러가 그에게 토큰을 재발급해 5분 고정 상한(ADR-015)이
+        // 리셋되고 rate 1개가 낭비된다. 입장자의 enter는 상태 조회로만 동작한다.
+        if (!queueRepository.hasEntryToken(eventId, userId)) {
+            queueRepository.enqueue(eventId, userId, System.currentTimeMillis());
+        }
         return buildStatus(eventId, userId);
     }
 
@@ -52,6 +57,19 @@ public class QueueService {
     public QueueStatusResponse status(Long eventId, Long userId) {
         requireEventExists(eventId);
         return buildStatus(eventId, userId);
+    }
+
+    /**
+     * 대기열 이탈 — 대기 순번과 입장 토큰을 함께 정리한다(어느 상태에서 호출해도 멱등).
+     * 프론트가 페이지 이탈(pagehide) 시 best-effort로 호출하며, 놓친 이탈(크래시·강제종료)은
+     * 토큰 TTL(5분)이 안전망으로 회수한다(ADR-015).
+     *
+     * <p>정리 연산이므로 이벤트 존재 검증을 하지 않는다 — 미존재 이벤트면 지울 것도 없어 no-op이고,
+     * 이탈 스파이크가 DB를 때릴 이유가 없다.
+     */
+    public void leave(Long eventId, Long userId) {
+        queueRepository.dequeue(eventId, userId);
+        queueRepository.releaseEntryToken(eventId, userId);
     }
 
     private QueueStatusResponse buildStatus(Long eventId, Long userId) {

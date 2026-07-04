@@ -49,4 +49,18 @@ public class QueueController {
 
         return ResponseEntity.ok(queueService.status(eventId, userDetails.getUserId()));
     }
+
+    /**
+     * 대기열 이탈 - 대기 순번과 입장 토큰을 함께 정리한다(멱등).
+     * 프론트가 페이지 이탈(pagehide) 시 keepalive 요청으로 호출한다 (ADR-015).
+     */
+    @PreAuthorize("hasRole('BOOKER')")
+    @PostMapping("/{eventId}/leave")
+    public ResponseEntity<Void> leave(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable Long eventId) {
+
+        queueService.leave(eventId, userDetails.getUserId());
+        return ResponseEntity.noContent().build();
+    }
 }

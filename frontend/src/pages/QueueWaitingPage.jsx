@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { enterQueue, getQueueStatus } from '../api/queue';
+import { useQueueLeaveBeacon } from '../hooks/useQueueLeaveBeacon';
 import { toMessage } from '../lib/errors';
 import Layout from '../components/Layout';
 import Spinner from '../components/Spinner';
@@ -11,6 +12,9 @@ export default function QueueWaitingPage() {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState('');
   const timerRef = useRef(null);
+
+  // 대기 중 페이지를 닫거나 새로고침하면 대기 순번을 정리한다 (ADR-015).
+  useQueueLeaveBeacon(eventId, true);
 
   const goToEvent = useCallback(() => {
     clearTimeout(timerRef.current);
@@ -29,8 +33,14 @@ export default function QueueWaitingPage() {
 
     async function poll() {
       try {
-        const res = await getQueueStatus(eventId);
+        let res = await getQueueStatus(eventId);
         if (cancelled) return;
+        // 자가 치유: 새로고침 시 pagehide의 leave(keepalive)가 재진입 enter보다 늦게
+        // 도착하면 방금 선 줄이 지워질 수 있다. 대기 중인데 순번이 사라졌으면 다시 줄을 선다.
+        if (!res.data.admitted && res.data.position == null) {
+          res = await enterQueue(eventId);
+          if (cancelled) return;
+        }
         setStatus(res.data);
         if (res.data.admitted) {
           goToEvent();

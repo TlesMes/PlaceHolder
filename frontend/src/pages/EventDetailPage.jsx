@@ -4,6 +4,7 @@ import { getEventDetail } from '../api/events';
 import { holdSeat } from '../api/seats';
 import { enterQueue } from '../api/queue';
 import { useSeatPolling } from '../hooks/useSeatPolling';
+import { useQueueLeaveBeacon } from '../hooks/useQueueLeaveBeacon';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { toMessage } from '../lib/errors';
@@ -26,6 +27,10 @@ export default function EventDetailPage() {
 
   const [selectedSeatId, setSelectedSeatId] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  // queueEnabled 이벤트: 좌석 페이지를 닫거나 새로고침하면 입장 토큰을 회수한다 (ADR-015).
+  // 재진입하려면 재대기 — 새로고침도 이탈로 취급하는 의도된 동작.
+  useQueueLeaveBeacon(id, Boolean(event?.queueEnabled) && isBooker);
 
   useEffect(() => {
     getEventDetail(id)
