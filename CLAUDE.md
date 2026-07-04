@@ -192,12 +192,20 @@ com.placeholder
   - 테스트 82 통과(신규 `ConfirmTokenReleaseTest` 4: 성공 회수/롤백 보존/비활성 이벤트 no-op 멱등/ceiling 가득→confirm→다음 대기자 입장). **degradation 우연 실증**: Redis 컨테이너 없는 기존 confirm 테스트에서 catch 경로가 실제로 동작함을 확인
   - 행동 변화: queueEnabled 이벤트에서 confirm 후 재hold는 재대기 필요(1인 1좌석 전제의 의도된 동작)
 
+- **Phase E-1: 이탈 유저 세션 즉시 회수** — PR #17 (`feature/queue-leave-release`, **머지 완료 2026-07-04**)
+  - confirm 없이 떠난 유저의 유령을 두 곳에서 제거: 입장 후 이탈(토큰이 TTL까지 ceiling 점유) + **대기 중 이탈**(대기열 ZSET엔 TTL 없어 순번 되면 유령에게 토큰 발급 — 검토 중 발견). ADR-015
+  - `POST /api/queue/{eventId}/leave`: 대기 순번(ZREM)+토큰(`releaseEntryToken`) **무조건 함께** 정리(멱등, DB 무접촉). 프론트 `pagehide`+`fetch(keepalive)`로 호출(sendBeacon은 JWT 헤더 불가) — 대기실+좌석페이지 부착. SPA 내부이동·백그라운드탭은 이탈 아님, 크래시는 TTL 안전망(best-effort)
+  - **전제(작성자 결정):** 입장 토큰 TTL 5분은 고정 상한, 연장 없음(초과=캠핑=퇴장) → sliding TTL/heartbeat 기각, 문제를 "고정 5분 내 이탈 감지 속도"로 좁힘
+  - **함께 수정한 기존 버그:** 토큰 보유자가 hold하며 enter 재호출→대기열 재enqueue→나중에 토큰 재발급으로 5분 상한 리셋+rate 낭비. `enter`에서 토큰 보유자는 enqueue 생략("토큰 XOR 대기" 서버 불변식). 대기실 새로고침 race(leave가 재진입보다 늦게 도착→새 줄 삭제)는 폴링 자가치유(position null이면 재진입)로 방어
+  - 테스트 88 통과(신규 `QueueLeaveTest` 5 + `QueueServiceTest` +1). **Chrome 실브라우저 E2E 검증**: keepalive+JWT(preflight) 조합이 언로드 중에도 서버 도달, 새로고침 시 토큰 즉시 회수 2회 재현(Redis ground truth)
+  - ⚠️ **드러난 후속 과제(hold 미반환):** 좌석 hold한 유저가 결제페이지 이탈→좌석페이지 복귀 시 "내 홀드 재개" UI가 죽어있어(`myHeldSeatId={null}` 하드코딩 + DTO에 heldByMe 없음) 자기 좌석 재선택 불가 → 새로고침하면 토큰까지 회수돼 재대기+재hold 거부(isHoldable=false)로 5분 데드락. **PR #17이 만든 게 아니라 기존 버그(뒤로가기만 해도 재현)를 노출.** → 다음 작업(hold 반환)에서 해소
+
 ### 현재 상태
 - **작업 브랜치:** `main` (E-1 일단락, 다음 작업 미착수)
-- **마지막 main 커밋:** `Merge pull request #16` (4a86448)
-  - PR #1~11, #13~16 머지 완료
+- **마지막 main 커밋:** `Merge pull request #17` (df97432)
+  - PR #1~11, #13~17 머지 완료
   - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종) 완료
-  - **E-1 대기열 전 구간 머지 완료:** 백엔드(#13, 06-27) + 프론트·입장재설계(#14, 06-29) + enter/status 캐싱(#15, 06-30, ADR-014) + confirm 토큰 회수(#16, 07-03)
+  - **E-1 대기열 전 구간 머지 완료:** 백엔드(#13, 06-27) + 프론트·입장재설계(#14, 06-29) + enter/status 캐싱(#15, 06-30, ADR-014) + confirm 토큰 회수(#16, 07-03) + 이탈 세션 회수(#17, 07-04, ADR-015)
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -210,18 +218,23 @@ com.placeholder
   - **GET /api/providers/my/settlement** - 정산 잔액 + SETTLE 거래 목록 (PROVIDER) ★ E-3
   - **POST /api/queue/{eventId}/enter** - 대기열 진입(순번 반환) (BOOKER) ★ E-1
   - **GET /api/queue/{eventId}/status** - 순번·대기 인원·입장 여부·nextPollDelayMs (BOOKER) ★ E-1
+  - **POST /api/queue/{eventId}/leave** - 대기열 이탈(순번+토큰 회수, 멱등) (BOOKER) ★ E-1
   - POST /api/loadtest/coupons - 쿠폰 생성 (**loadtest 프로파일 전용**, 운영 404)
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. 대기열 백로그(아래) 중 택1 — **다음 세션 시작점: 이탈 유저 토큰 회수 방안 검토(사용자 지정, 2026-07-03).**
+1. **이탈 시 hold 반환** (`feature/hold-release-on-leave`) — **다음 세션 시작점(사용자 지정, 2026-07-04).** PR #17이 대기열 세션(순번+토큰)까지 회수했으나 **좌석 hold(최희소 자원)는 만료 대기(5분)뿐**이라 미반환. 오늘 발견한 "내 좌석 데드락"의 원천.
+   - `POST /api/seats/{seatId}/release` (BOOKER): 비관적 락, "HELD && 내 홀드"만 `seat.release()`, 아니면 no-op(멱등). 타인·CONFIRMED 불가침
+   - CheckoutPage 이탈 처리: `beforeunload` 경고(티켓링크식) + `pagehide`→hold+토큰 반환 + **SPA 뒤로가기(unmount)→hold만 반환·토큰 유지**("좌석 바꾸기" 성립)
+   - 테스트: 본인 release/타인·CONFIRMED·만료 no-op / **release vs confirm 동시성**(락 경합)
+   - 효과: 데드락 원천 소멸(이탈 즉시 좌석 AVAILABLE → "내 홀드 재개" UI 불필요)
+2. **대기열을 hold가 아닌 event에 배치 (A안 전환)** — 현재 게이트는 hold에만(B안): 좌석페이지 조회는 자유, 대기열이 지키는 건 hold 버튼 하나. "좌석 골라놓고 줄→돌아오면 매진" UX 함정 + ceiling이 좌석 폴링 부하를 셰이핑 못 함. A안: **좌석페이지 진입 자체를 게이트 뒤로**(토큰 없으면 대기실 리다이렉트) + hold 버튼에서 enter 제거(바로 hold). ADR-013 "조회는 자유" 개정 동반. *1번 완료 후 — 결제페이지 이탈 처리는 A안에서도 그대로 쓰임.*
 
-### 백로그 — 대기열 (우선순위 순, 다음 세션 이어가기용)
-> PR #14에서 E-1 입장 제어를 다듬으며 식별. 지금은 단일 인스턴스·단일 핫이벤트 전제로 충분. (~~confirm 시 토큰 반환~~ → PR #16 완료)
-1. **이탈 유저 토큰 회수 방안** — confirm 없이 떠난 유저는 명시적 종료 신호가 없어 TTL(5분)까지 유령 세션으로 남음. 감지 방안 비교 검토(heartbeat/폴링 중단 감지, TTL 단축+활동 시 연장, 클라이언트 이탈 훅 등)부터. ← **다음 세션 시작점**
-2. **이벤트별 가중치 입장 제어(RR/쿼터) + 저부하 프리패스** — 현재 ceiling·rate는 **전역**이라 핫 이벤트가 전역 rate를 독식해 다른 이벤트가 굶을(starvation) 수 있음. 전역 캡 아래 이벤트별 공정 분배 도입, 그 안전망 위에서 enter 프리패스 재검토(키 분리 아님 — 전역은 의도된 설계). *큰 단위·동시성 showcase.*
-3. **대기열 필요성 실측** — D-2는 생성기 병목으로 미입증. 부하생성기 별도 머신 + 핫좌석 경합 부하로 지속 과부하 구간 측정. *인프라 의존(별도 머신).*
-4. **enter/status 캐싱 효과 실측** — PR #15(ADR-014)는 효과 미측정. 캐시 on/off로 existsById 쿼리 수·커넥션 점유 비교(생성기 분리 필요). *3번과 함께 묶을 수 있음.*
+### 백로그 — 대기열 (우선순위 순)
+> PR #14에서 E-1 입장 제어를 다듬으며 식별. 지금은 단일 인스턴스·단일 핫이벤트 전제로 충분. (~~confirm 토큰 반환~~ #16, ~~이탈 세션 회수~~ #17 완료)
+1. **이벤트별 가중치 입장 제어(RR/쿼터) + 저부하 프리패스** — 현재 ceiling·rate는 **전역**이라 핫 이벤트가 전역 rate를 독식해 다른 이벤트가 굶을(starvation) 수 있음. 전역 캡 아래 이벤트별 공정 분배 도입, 그 안전망 위에서 enter 프리패스 재검토(키 분리 아님 — 전역은 의도된 설계). *큰 단위·동시성 showcase.*
+2. **대기열 필요성 실측** — D-2는 생성기 병목으로 미입증. 부하생성기 별도 머신 + 핫좌석 경합 부하로 지속 과부하 구간 측정. *인프라 의존(별도 머신).*
+3. **enter/status 캐싱 효과 실측** — PR #15(ADR-014)는 효과 미측정. 캐시 on/off로 existsById 쿼리 수·커넥션 점유 비교(생성기 분리 필요). *2번과 함께 묶을 수 있음.*
 
 ### 백로그 — 기타
 - **정산 조회 cursor 페이징(측정 선행):** `/providers/my/settlement` 전건 반환 → 건수 증가 응답 곡선 측정 후 도입 판단. `docs/performance/settlement-query-scalability.md`
