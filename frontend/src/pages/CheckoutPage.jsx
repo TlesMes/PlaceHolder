@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { getSeats, confirmSeat } from '../api/seats';
 import { getEventDetail } from '../api/events';
+import { useCheckoutLeaveRelease } from '../hooks/useCheckoutLeaveRelease';
 import { useToast } from '../context/ToastContext';
 import { toMessage } from '../lib/errors';
 import { formatPrice, formatPoint } from '../lib/format';
@@ -63,6 +64,14 @@ export default function CheckoutPage() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [done]);
+
+  // 이탈 시 좌석 hold 반환 (뒤로가기=좌석만·토큰 유지 / 닫기·새로고침=좌석+대기열 leave). ADR-016.
+  useCheckoutLeaveRelease({
+    seatId,
+    eventId: id,
+    queueEnabled: Boolean(event?.queueEnabled),
+    done,
+  });
 
   const handlePay = async () => {
     if (!bookerName.trim()) {

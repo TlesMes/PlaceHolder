@@ -3,6 +3,7 @@ package com.placeholder.domain.seat.service;
 import com.placeholder.domain.event.dto.EventCreateRequest;
 import com.placeholder.domain.event.entity.Event;
 import com.placeholder.domain.seat.dto.SeatHoldResponse;
+import com.placeholder.domain.seat.dto.SeatReleaseResponse;
 import com.placeholder.domain.seat.dto.SeatResponse;
 import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.seat.entity.Seat;
@@ -94,6 +95,32 @@ public class SeatService {
                 .status(seat.getStatus().name())
                 .heldBy(booker.getId())
                 .heldUntil(seat.getHeldUntil())
+                .build();
+    }
+
+    /**
+     * 좌석 hold 반환. 결제페이지 이탈 시 좌석(가장 희소한 자원)을 만료(5분) 전에 즉시 AVAILABLE로 되돌린다 (ADR-016).
+     * 비관적 락으로 좌석 행을 잠근 뒤 "HELD && 내 홀드"일 때만 반환하고, 그 외(타인 홀드·CONFIRMED·이미 AVAILABLE)는
+     * 예외 없이 no-op 한다 — pagehide/unmount에서 중복·경쟁 호출(만료 스케줄러 선점 등)이 들어와도 멱등해야 한다.
+     * 입장 토큰은 건드리지 않는다: 뒤로가기(좌석만 반환·토큰 유지)와 완전 이탈(좌석+leave)을 프론트가 구분하려면
+     * 토큰 회수는 별도 leave API가 담당해야 하기 때문 (ADR-016). release는 자원 반납이라 대기열 게이트도 불필요.
+     */
+    @Transactional
+    public SeatReleaseResponse releaseSeat(Long seatId, Long bookerId) {
+        Seat seat = seatRepository.findByIdForUpdate(seatId)
+                .orElseThrow(() -> new SeatNotFoundException("좌석을 찾을 수 없습니다"));
+
+        boolean mine = seat.getStatus() == Seat.SeatStatus.HELD
+                && seat.getHeldBy() != null
+                && seat.getHeldBy().getId().equals(bookerId);
+        if (mine) {
+            seat.release();
+        }
+
+        return SeatReleaseResponse.builder()
+                .seatId(seat.getId())
+                .status(seat.getStatus().name())
+                .released(mine)
                 .build();
     }
 
