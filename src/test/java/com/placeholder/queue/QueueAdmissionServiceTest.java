@@ -214,6 +214,38 @@ class QueueAdmissionServiceTest extends RedisIntegrationTest {
         assertThat(queueRepository.size(small)).isEqualTo(6);  // 10 − 4
     }
 
+    @Test
+    @DisplayName("핫 이벤트가 rate 전량 처리 중 신규 이벤트 등장 → 다음 틱부터 즉시 균등 몫")
+    void admit_newEventJoinsMidStream_getsFairShareImmediately() {
+        long hot = uniqueId();
+        enqueue(hot, 20);
+
+        int first = admissionService.admitWaiting();    // hot 단독 → rate 8 전량 사용
+        assertThat(first).isEqualTo(8);
+        assertThat(queueRepository.size(hot)).isEqualTo(12);
+
+        // 처리 도중 신규 소형 이벤트 오픈 — 5명이 줄 서기 시작. 다음 틱 모사(rate 리셋 + ceiling 회수)
+        long small = uniqueId();
+        enqueue(small, 5);
+        deleteByPattern("rate:*");
+        redis.delete("active:all");
+
+        int second = admissionService.admitWaiting();
+
+        assertThat(second).isEqualTo(8);
+        // 신규 이벤트는 등장한 바로 다음 틱에 균등 몫 4 — 핫 이벤트 소진을 기다리며 굶지 않는다
+        for (long u = 1; u <= 4; u++) {
+            assertThat(queueRepository.hasEntryToken(small, u)).isTrue();
+        }
+        assertThat(queueRepository.size(small)).isEqualTo(1);
+        // 핫은 독점(8)에서 균등 몫(4)으로 재적응 — 9..12번째 입장, FIFO 유지
+        for (long u = 9; u <= 12; u++) {
+            assertThat(queueRepository.hasEntryToken(hot, u)).isTrue();
+        }
+        assertThat(queueRepository.hasEntryToken(hot, 13L)).isFalse();
+        assertThat(queueRepository.size(hot)).isEqualTo(8);
+    }
+
     // --- 헬퍼 ---
 
     /** userId 1..n을 진입 순서(증가 score)대로 대기열에 넣는다. */
