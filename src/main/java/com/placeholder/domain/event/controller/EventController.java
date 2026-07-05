@@ -51,11 +51,18 @@ public class EventController {
     }
 
     /**
-     * 이벤트의 좌석 목록 조회
+     * 이벤트의 좌석 목록 조회.
+     *
+     * <p>queueEnabled 이벤트는 입장 토큰이 있어야 좌석 그리드를 반환한다(A안, ADR-013 개정) —
+     * 좌석 폴링 부하도 ceiling으로 바운드하기 위함. 경로는 permitAll이라 비로그인은 principal이
+     * null이며, 게이트는 SeatService가 판정한다(토큰 없으면 429). 비-큐 이벤트는 종전대로 자유 조회.
      */
     @GetMapping("/{eventId}/seats")
-    public ResponseEntity<SeatResponse> getSeats(@PathVariable Long eventId) {
-        SeatResponse response = seatService.getSeatsResponse(eventId);
+    public ResponseEntity<SeatResponse> getSeats(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable Long eventId) {
+        Long bookerId = (userDetails != null) ? userDetails.getUserId() : null;
+        SeatResponse response = seatService.getSeatsResponse(eventId, bookerId);
         return ResponseEntity.ok(response);
     }
 }

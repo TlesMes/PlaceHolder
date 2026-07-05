@@ -14,10 +14,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 대기열 API (ADR-013). hold 진입 전 트래픽을 셰이핑한다.
+ * 대기열 API (ADR-013, A안 개정). 좌석페이지(이벤트) 진입 전 트래픽을 셰이핑한다.
  *
- * <p>대기열 게이트는 hold 진입점({@code POST /seats/{id}/hold})에만 건다. 조회(좌석 그리드)는 자유,
- * confirm은 hold 하위집합이라 별도 게이트가 불필요하다(E-1 3단계에서 hold 게이트 연결).
+ * <p>대기열 게이트는 이벤트 진입점 — 좌석 조회({@code GET /events/{id}/seats})와
+ * hold({@code POST /seats/{id}/hold}) 양쪽 — 에 건다. queueEnabled 이벤트는 입장 토큰 없이는
+ * 좌석 그리드조차 못 보므로 실시간 폴링 부하도 ceiling으로 바운드된다. confirm은 hold 하위집합이라
+ * 별도 게이트가 불필요하다.
  */
 @RestController
 @RequestMapping("/api/queue")

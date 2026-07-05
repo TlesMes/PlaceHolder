@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getEventDetail } from '../api/events';
 import { holdSeat } from '../api/seats';
-import { enterQueue } from '../api/queue';
+import { getQueueStatus } from '../api/queue';
 import { useSeatPolling } from '../hooks/useSeatPolling';
 import { useQueueLeaveBeacon } from '../hooks/useQueueLeaveBeacon';
 import { useAuth } from '../context/AuthContext';
@@ -23,20 +23,60 @@ export default function EventDetailPage() {
 
   const [event, setEvent] = useState(null);
   const [eventError, setEventError] = useState('');
-  const { seats, loading: seatsLoading, refetch } = useSeatPolling(id);
+  // queueEnabled 이벤트 진입 게이트 (A안, ADR-013 개정): 입장 토큰이 있어야 좌석 그리드를 마운트한다.
+  const [admitted, setAdmitted] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  const queueGated = Boolean(event?.queueEnabled);
+  // 폴링은 비-큐 이벤트이거나, 큐 이벤트에서 입장(admitted)한 뒤에만 돈다. 미입장 상태에서
+  // 헛된 GET seats(게이트가 429로 거절)를 애초에 안 쏜다.
+  const pollEnabled = Boolean(event) && (!queueGated || admitted);
+  const { seats, loading: seatsLoading, refetch } = useSeatPolling(id, pollEnabled);
 
   const [selectedSeatId, setSelectedSeatId] = useState(null);
   const [busy, setBusy] = useState(false);
 
   // queueEnabled 이벤트: 좌석 페이지를 닫거나 새로고침하면 입장 토큰을 회수한다 (ADR-015).
   // 재진입하려면 재대기 — 새로고침도 이탈로 취급하는 의도된 동작.
-  useQueueLeaveBeacon(id, Boolean(event?.queueEnabled) && isBooker);
+  useQueueLeaveBeacon(id, queueGated && isBooker);
 
   useEffect(() => {
     getEventDetail(id)
       .then((res) => setEvent(res.data))
       .catch((err) => setEventError(toMessage(err, '이벤트 정보를 불러오지 못했습니다.')));
   }, [id]);
+
+  // 진입 게이트: queueEnabled 이벤트는 입장 토큰을 먼저 확인한다.
+  // 토큰 없는 booker는 대기실로 리다이렉트(좌석 그리드/폴링을 마운트하지 않음).
+  useEffect(() => {
+    if (!event) return;
+    if (!event.queueEnabled) {
+      setChecking(false);
+      return; // 비-큐 이벤트: 게이트 없음
+    }
+    if (!isBooker) {
+      setChecking(false);
+      return; // 비-booker: 좌석 조회/예약 불가 — 그리드 대신 안내 문구 (리다이렉트 없음)
+    }
+    let cancelled = false;
+    // getQueueStatus는 비변경 조회(enqueue는 대기실이 담당). 토큰 보유 시에만 입장 처리.
+    getQueueStatus(id)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.data.admitted) {
+          setAdmitted(true);
+          setChecking(false);
+        } else {
+          navigate(`/queue/${id}/waiting`, { replace: true });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) navigate(`/queue/${id}/waiting`, { replace: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [event, isBooker, id, navigate]);
 
   const selectedSeat = seats.find((s) => s.seatId === selectedSeatId);
 
@@ -57,27 +97,14 @@ export default function EventDetailPage() {
         state: { seat: selectedSeat, event, heldUntil: res.data.heldUntil },
       });
     } catch (err) {
+      // 입장 토큰 만료 등으로 자격을 잃으면 재대기 (게이트 429).
+      if (err?.response?.data?.code === 'QUEUE_ADMISSION_REQUIRED') {
+        navigate(`/queue/${id}/waiting`, { replace: true });
+        return;
+      }
       toast.error(toMessage(err, '홀드에 실패했습니다.'));
       setSelectedSeatId(null);
       refetch();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // queueEnabled 이벤트: 대기열 진입 후 대기실로 이동.
-  const handleEnterQueue = async () => {
-    setBusy(true);
-    try {
-      const res = await enterQueue(id);
-      if (res.data.admitted) {
-        // 이미 입장 토큰 보유 → 바로 hold 진행
-        await handleHold();
-      } else {
-        navigate(`/queue/${id}/waiting`);
-      }
-    } catch (err) {
-      toast.error(toMessage(err, '대기열 진입에 실패했습니다.'));
     } finally {
       setBusy(false);
     }
@@ -134,13 +161,20 @@ export default function EventDetailPage() {
               <StatusLegend />
             </div>
 
-            {!isBooker && (
+            {!isBooker && !queueGated && (
               <p className="mb-4 rounded-lg bg-surface-muted px-4 py-2.5 text-sm text-fg-muted">
                 좌석 홀드·예약은 BOOKER 계정만 가능합니다. 좌석 현황은 실시간으로 갱신됩니다.
               </p>
             )}
 
-            {seatsLoading ? (
+            {queueGated && !isBooker ? (
+              // 대기열 이벤트의 라이브 좌석 그리드는 입장 토큰 뒤에 있고, 토큰은 BOOKER만 받는다 (A안).
+              <p className="rounded-lg bg-warning-soft px-4 py-3 text-sm text-warning-soft-fg">
+                대기열 이벤트입니다. 좌석 조회·예약은 대기열에 입장한 BOOKER 계정만 가능합니다.
+              </p>
+            ) : checking ? (
+              <Spinner className="py-16" />
+            ) : seatsLoading ? (
               <Spinner className="py-16" />
             ) : seats.length === 0 ? (
               <div className="py-16 text-center text-sm text-fg-subtle">좌석이 없습니다.</div>
@@ -165,23 +199,14 @@ export default function EventDetailPage() {
               <span className="font-semibold text-fg">{selectedSeat.label}</span>
               <span className="text-fg-muted"> · {formatPrice(selectedSeat.price)} 선택됨</span>
             </div>
-            {event?.queueEnabled ? (
-              <button
-                onClick={handleEnterQueue}
-                disabled={busy}
-                className="rounded-lg bg-warning px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
-              >
-                {busy ? '처리 중…' : '대기열 입장하기'}
-              </button>
-            ) : (
-              <button
-                onClick={handleHold}
-                disabled={busy}
-                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover disabled:opacity-60"
-              >
-                {busy ? '처리 중…' : '홀드하고 결제하기'}
-              </button>
-            )}
+            {/* 입장(admitted)한 뒤에만 그리드가 뜨므로, 큐/비-큐 모두 hold로 통일 (A안). */}
+            <button
+              onClick={handleHold}
+              disabled={busy}
+              className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover disabled:opacity-60"
+            >
+              {busy ? '처리 중…' : '홀드하고 결제하기'}
+            </button>
           </div>
         </div>
       )}

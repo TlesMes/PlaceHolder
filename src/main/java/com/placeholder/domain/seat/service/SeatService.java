@@ -2,6 +2,7 @@ package com.placeholder.domain.seat.service;
 
 import com.placeholder.domain.event.dto.EventCreateRequest;
 import com.placeholder.domain.event.entity.Event;
+import com.placeholder.domain.event.repository.EventRepository;
 import com.placeholder.domain.seat.dto.SeatHoldResponse;
 import com.placeholder.domain.seat.dto.SeatReleaseResponse;
 import com.placeholder.domain.seat.dto.SeatResponse;
@@ -34,6 +35,7 @@ public class SeatService {
     private final SeatRepository seatRepository;
     private final UserRepository userRepository;
     private final QueueRedisRepository queueRepository;
+    private final EventRepository eventRepository;
 
     @Value("${seat.hold.ttl-minutes:5}")
     private int holdTtlMinutes;
@@ -139,6 +141,21 @@ public class SeatService {
     }
 
     /**
+     * 조회 경로 대기열 게이트 (A안, ADR-013 개정). 좌석 그리드 조회(실시간 폴링)도 대기열이 지키는
+     * D-2 부하이므로, queueEnabled 이벤트는 입장 토큰 없이는 좌석 목록을 반환하지 않는다 — 이로써
+     * ceiling이 MySQL 좌석 폴링 부하를 실제로 바운드한다. 비활성 이벤트·익명 조회는 그대로 통과한다.
+     *
+     * <p>{@code bookerId}는 비로그인(익명) 조회면 null이다. queueEnabled인데 토큰이 없으면(비로그인
+     * 포함) fast-fail 한다. 여기서 DB를 때리는 건 admitted 집합(=ceiling 바운드)뿐이라 비용이 제한된다.
+     */
+    private void enforceQueueAdmissionForEvent(Long eventId, Long bookerId) {
+        boolean queueEnabled = eventRepository.findQueueEnabledById(eventId).orElse(false);
+        if (queueEnabled && (bookerId == null || !queueRepository.hasEntryToken(eventId, bookerId))) {
+            throw new QueueAdmissionRequiredException("대기열 입장 토큰이 필요합니다. 대기열에 진입해 주세요");
+        }
+    }
+
+    /**
      * 이벤트의 좌석 목록 조회
      */
     public List<Seat> getSeatsByEventId(Long eventId) {
@@ -146,9 +163,11 @@ public class SeatService {
     }
 
     /**
-     * 좌석 목록 조회 Response 변환
+     * 좌석 목록 조회 Response 변환. {@code bookerId}는 비로그인 조회면 null.
+     * queueEnabled 이벤트는 입장 토큰 검증을 먼저 통과해야 한다(A안, ADR-013 개정).
      */
-    public SeatResponse getSeatsResponse(Long eventId) {
+    public SeatResponse getSeatsResponse(Long eventId, Long bookerId) {
+        enforceQueueAdmissionForEvent(eventId, bookerId);
         List<Seat> seats = getSeatsByEventId(eventId);
 
         List<SeatResponse.SeatInfo> seatInfos = seats.stream()
