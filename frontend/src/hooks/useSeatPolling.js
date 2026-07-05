@@ -9,9 +9,11 @@ import { getSeats } from '../api/seats';
  * 호출부(EventDetailPage)는 그대로 둔다. 폴링→푸시 트레이드오프는 의도된 설계.
  *
  * @param {string|number} eventId
+ * @param {boolean} enabled 폴링 활성 여부. queueEnabled 이벤트에서 입장 전엔 false로 두어
+ *   헛된 GET seats(대기열 게이트가 429로 거절) 호출을 애초에 막는다 (A안, ADR-013 개정).
  * @param {number} intervalMs 폴링 주기 (기본 2500ms)
  */
-export function useSeatPolling(eventId, intervalMs = 2500) {
+export function useSeatPolling(eventId, enabled = true, intervalMs = 2500) {
   const [seats, setSeats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -19,7 +21,7 @@ export function useSeatPolling(eventId, intervalMs = 2500) {
 
   const fetchSeats = useCallback(
     async (silent = false) => {
-      if (!eventId) return;
+      if (!eventId || !enabled) return;
       try {
         const res = await getSeats(eventId);
         setSeats(res.data.seats ?? []);
@@ -31,14 +33,14 @@ export function useSeatPolling(eventId, intervalMs = 2500) {
         if (!silent) setLoading(false);
       }
     },
-    [eventId]
+    [eventId, enabled]
   );
 
   // 즉시 갱신 (홀드/확정 직후 폴링을 기다리지 않기 위함).
   const refetch = useCallback(() => fetchSeats(true), [fetchSeats]);
 
   useEffect(() => {
-    if (!eventId) return;
+    if (!eventId || !enabled) return;
     // eventId 변경 시 로딩 표시 — 외부(API) 동기화의 일부.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
@@ -50,7 +52,7 @@ export function useSeatPolling(eventId, intervalMs = 2500) {
     }, intervalMs);
 
     return () => clearInterval(timerRef.current);
-  }, [eventId, intervalMs, fetchSeats]);
+  }, [eventId, enabled, intervalMs, fetchSeats]);
 
   return { seats, loading, error, refetch };
 }
