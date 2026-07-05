@@ -103,7 +103,7 @@ com.placeholder
 
 ---
 
-## 현재 진행 상황 (2026.06.30 기준)
+## 현재 진행 상황 (2026.07.05 기준)
 
 > 완료 항목은 "무엇을/왜"만 요약. 구현 디테일·근거는 해당 ADR / PR에서 확인.
 
@@ -198,19 +198,29 @@ com.placeholder
   - **전제(작성자 결정):** 입장 토큰 TTL 5분은 고정 상한, 연장 없음(초과=캠핑=퇴장) → sliding TTL/heartbeat 기각, 문제를 "고정 5분 내 이탈 감지 속도"로 좁힘
   - **함께 수정한 기존 버그:** 토큰 보유자가 hold하며 enter 재호출→대기열 재enqueue→나중에 토큰 재발급으로 5분 상한 리셋+rate 낭비. `enter`에서 토큰 보유자는 enqueue 생략("토큰 XOR 대기" 서버 불변식). 대기실 새로고침 race(leave가 재진입보다 늦게 도착→새 줄 삭제)는 폴링 자가치유(position null이면 재진입)로 방어
   - 테스트 88 통과(신규 `QueueLeaveTest` 5 + `QueueServiceTest` +1). **Chrome 실브라우저 E2E 검증**: keepalive+JWT(preflight) 조합이 언로드 중에도 서버 도달, 새로고침 시 토큰 즉시 회수 2회 재현(Redis ground truth)
-  - ⚠️ **드러난 후속 과제(hold 미반환):** 좌석 hold한 유저가 결제페이지 이탈→좌석페이지 복귀 시 "내 홀드 재개" UI가 죽어있어(`myHeldSeatId={null}` 하드코딩 + DTO에 heldByMe 없음) 자기 좌석 재선택 불가 → 새로고침하면 토큰까지 회수돼 재대기+재hold 거부(isHoldable=false)로 5분 데드락. **PR #17이 만든 게 아니라 기존 버그(뒤로가기만 해도 재현)를 노출.** → 다음 작업(hold 반환)에서 해소
+  - ⚠️ **드러난 후속 과제(hold 미반환):** 좌석 hold한 유저가 결제페이지 이탈→좌석페이지 복귀 시 "내 홀드 재개" UI가 죽어있어(`myHeldSeatId={null}` 하드코딩 + DTO에 heldByMe 없음) 자기 좌석 재선택 불가 → 새로고침하면 토큰까지 회수돼 재대기+재hold 거부(isHoldable=false)로 5분 데드락. **PR #17이 만든 게 아니라 기존 버그(뒤로가기만 해도 재현)를 노출.** → PR #18에서 해소
+
+- **Phase E-1: 이탈 시 좌석 hold 반환** — PR #18 (`feature/hold-release-on-leave`, **머지 완료 2026-07-05**)
+  - PR #17이 대기열 세션(순번+토큰)은 회수했지만 좌석 hold(최희소 자원)는 만료 대기(5분)뿐이라 미반환이던 "내 좌석 데드락"을 해소. 이탈 즉시 좌석을 AVAILABLE로 되돌려 원천 제거
+  - `POST /api/seats/{seatId}/release` (BOOKER): 비관적 락으로 "HELD && 내 홀드"만 `seat.release()`, 타인·CONFIRMED·이미 AVAILABLE은 멱등 no-op(남의 좌석 불가침)
+  - **핵심 결정(ADR-016):** release는 좌석만 반환하고 입장 토큰은 건드리지 않는다 — 뒤로가기(좌석만·토큰 유지→"좌석 바꾸기" 성립)와 완전 이탈(좌석+leave)을 프론트가 구분하려면 토큰 회수를 별도 leave API(#17)에 맡겨야 하기 때문
+  - `useCheckoutLeaveRelease` 훅: pagehide(닫기·새로고침)=좌석 반환+leave(keepalive) / SPA 언마운트(뒤로가기)=좌석만 반환. 결제 완료(done)면 생략. 기존 beforeunload 경고 유지
+  - **실브라우저 E2E 중 발견·수정한 버그:** React StrictMode(개발)의 마운트 직후 setup→cleanup→setup probe가 결제페이지 진입 즉시 좌석을 오반환시킴(hold 직후 release 관측) → `setTimeout(0)` 게이트(`canReleaseRef`)로 probe cleanup을 안전하게 지나치도록 수정. pagehide 경로는 window 이벤트라 애초에 무관
+  - 테스트: `SeatReleaseTest`(6, 본인 성공/타인·CONFIRMED·AVAILABLE no-op/만료 홀드 반환/미존재 예외) + `SeatReleaseConcurrencyTest`(release vs confirm 동시 경쟁 20회 반복, 최종 상태 CONFIRMED xor AVAILABLE 결정성 검증)
+  - **Chrome 실브라우저 E2E 검증**: hold 유지→SPA 뒤로가기 시 release 200+AVAILABLE 즉시 재선택 가능(데드락 소멸 확인)/pagehide keepalive release 200/정상 confirm 시 release 미발생(done 가드) 3개 시나리오 네트워크+DB ground truth로 확인
 
 ### 현재 상태
-- **작업 브랜치:** `main` (E-1 일단락, 다음 작업 미착수)
-- **마지막 main 커밋:** `Merge pull request #17` (df97432)
-  - PR #1~11, #13~17 머지 완료
+- **작업 브랜치:** `main` (E-1 hold 반환까지 완료, 다음 작업 미착수)
+- **마지막 main 커밋:** `Merge pull request #18` (a1c15fe)
+  - PR #1~11, #13~18 머지 완료
   - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종) 완료
-  - **E-1 대기열 전 구간 머지 완료:** 백엔드(#13, 06-27) + 프론트·입장재설계(#14, 06-29) + enter/status 캐싱(#15, 06-30, ADR-014) + confirm 토큰 회수(#16, 07-03) + 이탈 세션 회수(#17, 07-04, ADR-015)
+  - **E-1 대기열 전 구간 머지 완료:** 백엔드(#13, 06-27) + 프론트·입장재설계(#14, 06-29) + enter/status 캐싱(#15, 06-30, ADR-014) + confirm 토큰 회수(#16, 07-03) + 이탈 세션 회수(#17, 07-04, ADR-015) + 좌석 hold 반환(#18, 07-05, ADR-016)
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
   - GET /api/events - 이벤트 목록, GET /api/events/{id} - 상세, GET /api/events/{id}/seats - 좌석(heldUntil 포함)
   - POST /api/seats/{seatId}/hold - 좌석 홀드 (BOOKER)
+  - **POST /api/seats/{seatId}/release** - 좌석 hold 반환(이탈 시 즉시 회수, 멱등) (BOOKER) ★ E-1
   - POST /api/seats/{seatId}/confirm - 예약 확정 (BOOKER)
   - POST /api/points/redeem - 캠페인 쿠폰 상환→포인트 충전 (BOOKER)
   - **GET /api/reservations/my** - 내 예약 내역 (BOOKER) ★ E-3
@@ -223,12 +233,7 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **이탈 시 hold 반환** (`feature/hold-release-on-leave`) — **다음 세션 시작점(사용자 지정, 2026-07-04).** PR #17이 대기열 세션(순번+토큰)까지 회수했으나 **좌석 hold(최희소 자원)는 만료 대기(5분)뿐**이라 미반환. 오늘 발견한 "내 좌석 데드락"의 원천.
-   - `POST /api/seats/{seatId}/release` (BOOKER): 비관적 락, "HELD && 내 홀드"만 `seat.release()`, 아니면 no-op(멱등). 타인·CONFIRMED 불가침
-   - CheckoutPage 이탈 처리: `beforeunload` 경고(티켓링크식) + `pagehide`→hold+토큰 반환 + **SPA 뒤로가기(unmount)→hold만 반환·토큰 유지**("좌석 바꾸기" 성립)
-   - 테스트: 본인 release/타인·CONFIRMED·만료 no-op / **release vs confirm 동시성**(락 경합)
-   - 효과: 데드락 원천 소멸(이탈 즉시 좌석 AVAILABLE → "내 홀드 재개" UI 불필요)
-2. **대기열을 hold가 아닌 event에 배치 (A안 전환)** — 현재 게이트는 hold에만(B안): 좌석페이지 조회는 자유, 대기열이 지키는 건 hold 버튼 하나. "좌석 골라놓고 줄→돌아오면 매진" UX 함정 + ceiling이 좌석 폴링 부하를 셰이핑 못 함. A안: **좌석페이지 진입 자체를 게이트 뒤로**(토큰 없으면 대기실 리다이렉트) + hold 버튼에서 enter 제거(바로 hold). ADR-013 "조회는 자유" 개정 동반. *1번 완료 후 — 결제페이지 이탈 처리는 A안에서도 그대로 쓰임.*
+1. **대기열을 hold가 아닌 event에 배치 (A안 전환)** — 현재 게이트는 hold에만(B안): 좌석페이지 조회는 자유, 대기열이 지키는 건 hold 버튼 하나. "좌석 골라놓고 줄→돌아오면 매진" UX 함정 + ceiling이 좌석 폴링 부하를 셰이핑 못 함. A안: **좌석페이지 진입 자체를 게이트 뒤로**(토큰 없으면 대기실 리다이렉트) + hold 버튼에서 enter 제거(바로 hold). ADR-013 "조회는 자유" 개정 동반. 결제페이지 이탈 처리(#18)는 A안에서도 그대로 쓰임.
 
 ### 백로그 — 대기열 (우선순위 순)
 > PR #14에서 E-1 입장 제어를 다듬으며 식별. 지금은 단일 인스턴스·단일 핫이벤트 전제로 충분. (~~confirm 토큰 반환~~ #16, ~~이탈 세션 회수~~ #17 완료)
