@@ -25,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>in-flight 활성 세션이 ceiling을 차감(occupancy 반영)</li>
  *   <li>빈 대기열은 활성 집합에서 정리</li>
  *   <li>초과 → 한 명 이탈 → 다음 대기자 입장 + 뒷사람 대기순 −1</li>
+ *   <li>이벤트 간 분배(ADR-017): 균등 분할·work-conserving·크레딧/대출 부재. 장기 양상은
+ *       {@code QueueStarvationScenarioTest}가 실시간 30틱+로 검증</li>
  * </ul>
  */
 @SpringBootTest
@@ -134,6 +136,114 @@ class QueueAdmissionServiceTest extends RedisIntegrationTest {
         assertThat(queueRepository.hasEntryToken(eventId, 9L)).isTrue();
         assertThat(queueRepository.rank(eventId, 9L)).isNull();   // 입장 → 대기열 이탈
         assertThat(queueRepository.rank(eventId, 10L)).isZero();  // 1 → 0, 대기순 −1
+    }
+
+    // --- 이벤트 간 분배 (ADR-017: 균등 RR + deficit 이월) ---
+
+    @Test
+    @DisplayName("다중 이벤트: 틱 예산 균등 분할 + 짧은 큐 잉여는 남은 큐로 (독식 방지)")
+    void admit_splitsBudgetAcrossEvents_workConserving() {
+        long hot = uniqueId();
+        long small = uniqueId();
+        enqueue(hot, 20);
+        enqueue(small, 3);
+
+        int admitted = admissionService.admitWaiting();
+
+        assertThat(admitted).isEqualTo(8); // rate 전부 사용 — 분배가 처리량을 깎지 않음
+        // small: 균등 몫 4 중 대기 3명 전원 입장 (기존이라면 hot이 rate 8을 독식할 수 있던 상황)
+        for (long u = 1; u <= 3; u++) {
+            assertThat(queueRepository.hasEntryToken(small, u)).isTrue();
+        }
+        assertThat(queueRepository.size(small)).isZero();
+        // hot: 균등 몫 4 + small 잉여 1 = 5명, FIFO 앞에서부터
+        for (long u = 1; u <= 5; u++) {
+            assertThat(queueRepository.hasEntryToken(hot, u)).isTrue();
+        }
+        assertThat(queueRepository.hasEntryToken(hot, 6L)).isFalse();
+        assertThat(queueRepository.size(hot)).isEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("소진된 큐의 몫은 다음 틱에 남은 큐로 복귀 (work-conserving)")
+    void admit_returnsShareAfterQueueDrained() {
+        long hot = uniqueId();
+        long small = uniqueId();
+        enqueue(hot, 20);
+        enqueue(small, 3);
+
+        admissionService.admitWaiting();           // hot 5 + small 3 (위 테스트와 동일 분배)
+
+        // 다음 틱 모사: rate 윈도 리셋 + 입장자 전원 이탈로 ceiling 회수
+        deleteByPattern("rate:*");
+        redis.delete("active:all");
+
+        int second = admissionService.admitWaiting();
+
+        assertThat(second).isEqualTo(8);            // small 큐가 비어 rate 전부 hot으로 복귀
+        for (long u = 6; u <= 13; u++) {
+            assertThat(queueRepository.hasEntryToken(hot, u)).isTrue();
+        }
+        assertThat(queueRepository.size(hot)).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("짧은 큐 잉여는 공짜(대출 아님)·빈 큐 크레딧 축적 없음 — 재충원 시 균등 몫 복귀")
+    void admit_noStaleCreditNorDebt_afterRefill() {
+        long hot = uniqueId();
+        long small = uniqueId();
+        enqueue(hot, 20);
+        enqueue(small, 2);                          // small 균등 몫(4)보다 짧은 큐
+
+        admissionService.admitWaiting();            // hot 6(몫 4+잉여 2) + small 2
+        assertThat(queueRepository.size(hot)).isEqualTo(14);
+        assertThat(queueRepository.size(small)).isZero();
+
+        // small 재충원 + 다음 틱 모사
+        for (long u = 3; u <= 12; u++) {
+            queueRepository.enqueue(small, u, 2_000L + u);
+        }
+        deleteByPattern("rate:*");
+        redis.delete("active:all");
+
+        admissionService.admitWaiting();
+
+        // 정확히 4:4 균등 — hot이 잉여 2를 되갚지도 않고(대출 아님),
+        // small이 첫 틱에 못 쓴 몫을 몰아 받지도 않는다(빈 큐 크레딧 소멸)
+        assertThat(queueRepository.size(hot)).isEqualTo(10);   // 14 − 4
+        assertThat(queueRepository.size(small)).isEqualTo(6);  // 10 − 4
+    }
+
+    @Test
+    @DisplayName("핫 이벤트가 rate 전량 처리 중 신규 이벤트 등장 → 다음 틱부터 즉시 균등 몫")
+    void admit_newEventJoinsMidStream_getsFairShareImmediately() {
+        long hot = uniqueId();
+        enqueue(hot, 20);
+
+        int first = admissionService.admitWaiting();    // hot 단독 → rate 8 전량 사용
+        assertThat(first).isEqualTo(8);
+        assertThat(queueRepository.size(hot)).isEqualTo(12);
+
+        // 처리 도중 신규 소형 이벤트 오픈 — 5명이 줄 서기 시작. 다음 틱 모사(rate 리셋 + ceiling 회수)
+        long small = uniqueId();
+        enqueue(small, 5);
+        deleteByPattern("rate:*");
+        redis.delete("active:all");
+
+        int second = admissionService.admitWaiting();
+
+        assertThat(second).isEqualTo(8);
+        // 신규 이벤트는 등장한 바로 다음 틱에 균등 몫 4 — 핫 이벤트 소진을 기다리며 굶지 않는다
+        for (long u = 1; u <= 4; u++) {
+            assertThat(queueRepository.hasEntryToken(small, u)).isTrue();
+        }
+        assertThat(queueRepository.size(small)).isEqualTo(1);
+        // 핫은 독점(8)에서 균등 몫(4)으로 재적응 — 9..12번째 입장, FIFO 유지
+        for (long u = 9; u <= 12; u++) {
+            assertThat(queueRepository.hasEntryToken(hot, u)).isTrue();
+        }
+        assertThat(queueRepository.hasEntryToken(hot, 13L)).isFalse();
+        assertThat(queueRepository.size(hot)).isEqualTo(8);
     }
 
     // --- 헬퍼 ---
