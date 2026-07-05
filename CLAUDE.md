@@ -209,12 +209,19 @@ com.placeholder
   - 테스트: `SeatReleaseTest`(6, 본인 성공/타인·CONFIRMED·AVAILABLE no-op/만료 홀드 반환/미존재 예외) + `SeatReleaseConcurrencyTest`(release vs confirm 동시 경쟁 20회 반복, 최종 상태 CONFIRMED xor AVAILABLE 결정성 검증)
   - **Chrome 실브라우저 E2E 검증**: hold 유지→SPA 뒤로가기 시 release 200+AVAILABLE 즉시 재선택 가능(데드락 소멸 확인)/pagehide keepalive release 200/정상 confirm 시 release 미발생(done 가드) 3개 시나리오 네트워크+DB ground truth로 확인
 
+- **Phase E-1: 대기열 게이트를 이벤트(좌석페이지) 진입점으로 (A안 전환)** — PR #19 (`feature/queue-gate-event-entry`, **생성 2026-07-05, 머지 대기**)
+  - B안(hold 진입점에만 게이트)의 두 결함 해소: (1) 좌석 골라놓고 줄→돌아오면 매진 UX 함정, (2) `GET /events/{id}/seats` 폴링이 게이트 밖이라 ceiling이 D-2 좌석 폴링 부하를 못 셰이핑. A안: 좌석페이지 진입 자체를 게이트 뒤로(조회 read 경로 + hold 양쪽)
+  - **백엔드 조회 게이트:** `SeatService.getSeatsResponse(eventId, bookerId)`가 queueEnabled+토큰없음(익명 포함) fast-fail(`QueueAdmissionRequiredException`→429). `EventRepository.findQueueEnabledById` 경량 판정. `GET /events/**`는 permitAll 유지 — 게이트는 서비스가 판정(비-큐·비-booker 조회는 자유). admitted 집합(=ceiling 바운드)만 DB 접촉
+  - **프론트 진입 게이트:** `EventDetailPage`가 `getQueueStatus`로 토큰 확인→없으면 그리드/폴링 미마운트하고 대기실 리다이렉트. 비-booker는 안내 문구. "대기열 입장하기" 버튼 제거→단일 hold 흐름. `useSeatPolling(eventId, enabled)`로 미입장 시 헛된 GET seats 차단. 결제페이지 이탈 처리(#18)는 그대로 재사용
+  - **ADR-013 개정:** 거는 위치 이동 + "배치도는 먼저 보여준다(조회 자유)" 조항 반전(핫 이벤트에선 라이브 그리드 폴링이 곧 D-2 부하). 2층 구조(대기열=트래픽, 락=정합성) 불변. 향후 LB/엣지 승격·서명 토큰 stateless화 방향 명시
+  - 테스트: `SeatQueryQueueGateTest` 4종(토큰없음/보유/익명/비활성) + 전체 그린. **Chrome 실브라우저 E2E**: 비-booker→안내·GET seats 미발생 / 미입장 booker→대기실 리다이렉트 후 네트워크 순서상 `status(false)→enter→status(true)→events→seats`로 **미입장 전 구간 GET seats 0건**, 입장 후에만 등장 / 입장 후 그리드+단일 hold 버튼 확인
+
 ### 현재 상태
-- **작업 브랜치:** `main` (E-1 hold 반환까지 완료, 다음 작업 미착수)
+- **작업 브랜치:** `feature/queue-gate-event-entry` (A안 전환 커밋 3개, PR #19 생성·머지 대기)
 - **마지막 main 커밋:** `Merge pull request #18` (a1c15fe)
-  - PR #1~11, #13~18 머지 완료
+  - PR #1~11, #13~18 머지 완료 / **PR #19(A안 게이트) 생성·미머지**
   - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종) 완료
-  - **E-1 대기열 전 구간 머지 완료:** 백엔드(#13, 06-27) + 프론트·입장재설계(#14, 06-29) + enter/status 캐싱(#15, 06-30, ADR-014) + confirm 토큰 회수(#16, 07-03) + 이탈 세션 회수(#17, 07-04, ADR-015) + 좌석 hold 반환(#18, 07-05, ADR-016)
+  - **E-1 대기열 전 구간 머지 완료:** 백엔드(#13, 06-27) + 프론트·입장재설계(#14, 06-29) + enter/status 캐싱(#15, 06-30, ADR-014) + confirm 토큰 회수(#16, 07-03) + 이탈 세션 회수(#17, 07-04, ADR-015) + 좌석 hold 반환(#18, 07-05, ADR-016) + **A안 게이트 이동(#19, 07-05, 미머지)**
 - **실행 가능 API:**
   - POST /api/auth/signup - 회원가입, POST /api/auth/login - 로그인(JWT 발급)
   - POST /api/events - 이벤트 등록 (PROVIDER 토큰 필요)
@@ -233,7 +240,8 @@ com.placeholder
 - **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
 
 ### 다음 작업 (우선순위 순)
-1. **대기열을 hold가 아닌 event에 배치 (A안 전환)** — 현재 게이트는 hold에만(B안): 좌석페이지 조회는 자유, 대기열이 지키는 건 hold 버튼 하나. "좌석 골라놓고 줄→돌아오면 매진" UX 함정 + ceiling이 좌석 폴링 부하를 셰이핑 못 함. A안: **좌석페이지 진입 자체를 게이트 뒤로**(토큰 없으면 대기실 리다이렉트) + hold 버튼에서 enter 제거(바로 hold). ADR-013 "조회는 자유" 개정 동반. 결제페이지 이탈 처리(#18)는 A안에서도 그대로 쓰임.
+0. **PR #19(A안 게이트) self-review → 머지** — 머지되면 이 진행상황을 "머지 완료"로 갱신하고 작업 브랜치를 `main`으로 되돌린다.
+1. ~~대기열을 hold가 아닌 event에 배치 (A안 전환)~~ → **PR #19로 완료(머지 대기).** 이후 후보는 아래 백로그 "대기열 1번(이벤트별 가중치 입장 제어)".
 
 ### 백로그 — 대기열 (우선순위 순)
 > PR #14에서 E-1 입장 제어를 다듬으며 식별. 지금은 단일 인스턴스·단일 핫이벤트 전제로 충분. (~~confirm 토큰 반환~~ #16, ~~이탈 세션 회수~~ #17 완료)
