@@ -93,6 +93,8 @@ export default function QueueWaitingPage() {
         <h1 className="text-2xl font-bold text-fg">입장 대기 중</h1>
         <p className="mt-2 text-sm text-fg-muted">
           순서가 되면 자동으로 좌석 선택 화면으로 이동합니다.
+          <br />
+          페이지를 벗어나면 대기 순번이 사라집니다.
         </p>
 
         {status ? (
