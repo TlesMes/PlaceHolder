@@ -130,6 +130,8 @@ export default function CheckoutPage() {
       <h1 className="mb-1 text-2xl font-bold tracking-tight text-fg">결제</h1>
       <p className="mb-6 text-sm text-fg-muted">
         홀드된 좌석은 제한 시간 내에 결제해야 합니다.
+        <br />
+        페이지를 벗어나면 좌석 점유가 해제됩니다.
       </p>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
