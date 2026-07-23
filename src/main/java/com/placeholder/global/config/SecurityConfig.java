@@ -50,6 +50,9 @@ public class SecurityConfig {
                         // 부하 측정 전용 쿠폰 생성. 컨트롤러가 @Profile("loadtest")라 운영에선 빈이 없어
                         // 경로가 열려 있어도 404 — loadtest 프로파일에서만 실제로 도달 가능.
                         .requestMatchers(HttpMethod.POST, "/api/loadtest/**").permitAll()
+                        // 토스 결제 웹훅. 토스가 JWT 없이 호출하므로 permitAll — 위조 방어는 서비스가
+                        // 페이로드 불신 + 토스 재조회로 수행한다 (ADR-018).
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(
