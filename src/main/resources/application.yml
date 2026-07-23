@@ -50,3 +50,10 @@ queue:
 jwt:
   secret: ${JWT_SECRET:placeholder-dev-secret-key-must-be-at-least-32-bytes!!}
   expiration-ms: 86400000
+
+toss:
+  # 결제 위젯용 공개 키(프론트 노출 가능). 주문 생성 응답으로 내려간다.
+  client-key: ${TOSS_CLIENT_KEY:}
+  # 서버 전용 시크릿 키(절대 노출·커밋 금지). confirm·조회 호출의 Basic Auth에 사용.
+  secret-key: ${TOSS_SECRET_KEY:}
+  api-base-url: ${TOSS_API_BASE_URL:https://api.tosspayments.com}
