@@ -27,9 +27,14 @@ export default function Header() {
           {isAuthenticated ? (
             <>
               {role === 'BOOKER' && (
-                <Link to="/me" className={navLinkClass}>
-                  마이페이지
-                </Link>
+                <>
+                  <Link to="/points/charge" className={navLinkClass}>
+                    충전
+                  </Link>
+                  <Link to="/me" className={navLinkClass}>
+                    마이페이지
+                  </Link>
+                </>
               )}
               {role === 'PROVIDER' && (
                 <>
