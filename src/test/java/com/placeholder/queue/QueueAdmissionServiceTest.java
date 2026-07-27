@@ -3,7 +3,6 @@ package com.placeholder.queue;
 import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.queue.service.QueueAdmissionService;
 import com.placeholder.support.RedisIntegrationTest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,13 +38,7 @@ class QueueAdmissionServiceTest extends RedisIntegrationTest {
     @Autowired QueueRedisRepository queueRepository;
     @Autowired StringRedisTemplate redis;
 
-    @AfterEach
-    void flush() {
-        deleteByPattern("queue:*");
-        deleteByPattern("entry:*");
-        deleteByPattern("rate:*");
-        redis.delete("active:all");
-    }
+    // 테스트 간 Redis·deficit 장부 정리는 RedisIntegrationTest가 일괄 수행한다.
 
     @Test
     @DisplayName("대기 인원 ≤ ceiling: 전원 토큰 발급, 대기열 비움")

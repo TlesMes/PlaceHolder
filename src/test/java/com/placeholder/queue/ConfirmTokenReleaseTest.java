@@ -16,7 +16,6 @@ import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
 import com.placeholder.global.exception.custom.InsufficientPointException;
 import com.placeholder.support.RedisIntegrationTest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,13 +57,7 @@ class ConfirmTokenReleaseTest extends RedisIntegrationTest {
     @Autowired EventRepository eventRepository;
     @Autowired UserRepository userRepository;
 
-    @AfterEach
-    void flush() {
-        deleteByPattern("queue:*");
-        deleteByPattern("entry:*");
-        deleteByPattern("rate:*");
-        redis.delete("active:all");
-    }
+    // 테스트 간 Redis·deficit 장부 정리는 RedisIntegrationTest가 일괄 수행한다.
 
     @Test
     @DisplayName("confirm 성공: 입장 토큰 + 전역 활성 세션 즉시 회수")

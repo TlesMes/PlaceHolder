@@ -3,7 +3,6 @@ package com.placeholder.queue;
 import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.queue.service.QueueAdmissionService;
 import com.placeholder.support.RedisIntegrationTest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,13 +39,8 @@ class QueueStarvationScenarioTest extends RedisIntegrationTest {
     @Autowired QueueRedisRepository queueRepository;
     @Autowired StringRedisTemplate redis;
 
-    @AfterEach
-    void flush() {
-        deleteByPattern("queue:*");
-        deleteByPattern("entry:*");
-        deleteByPattern("rate:*");
-        redis.delete("active:all");
-    }
+    // 테스트 간 Redis·deficit 장부 정리는 RedisIntegrationTest가 일괄 수행한다.
+    // (이 테스트는 33틱을 돌며 장부에 끝수를 쌓으므로 장부 초기화가 특히 중요하다 — ADR-017)
 
     @Test
     @DisplayName("30초+ 실측: 핫 이벤트 압도 하에서도 소형 이벤트 기아 없음, 소진 후 rate 전량 회수")
@@ -147,8 +141,4 @@ class QueueStarvationScenarioTest extends RedisIntegrationTest {
         }
     }
 
-    private void deleteByPattern(String pattern) {
-        var keys = redis.keys(pattern);
-        if (keys != null && !keys.isEmpty()) redis.delete(keys);
-    }
 }
