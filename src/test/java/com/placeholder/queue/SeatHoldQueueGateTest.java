@@ -48,12 +48,16 @@ class SeatHoldQueueGateTest extends RedisIntegrationTest {
     @Autowired QueueRedisRepository queueRepository;
     @Autowired StringRedisTemplate redis;
 
+    // issueEntryToken은 entry: 키와 active:all ZSET을 함께 쓴다(쌍). entry:만 지우면 active:all
+    // 멤버가 TTL(5분)까지 남아 전역 ceiling 슬롯을 계속 점유하고, 싱글톤 Redis를 공유하는 다음
+    // 테스트 클래스의 입장 인원이 1 모자라게 된다 → 반드시 쌍으로 정리한다.
     @AfterEach
     void flushEntryTokens() {
         var keys = redis.keys("entry:*");
         if (keys != null && !keys.isEmpty()) {
             redis.delete(keys);
         }
+        redis.delete("active:all");
     }
 
     @Test
