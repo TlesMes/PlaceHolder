@@ -3,6 +3,8 @@ package com.placeholder.domain.payment.client;
 import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -10,6 +12,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
 
@@ -30,12 +33,23 @@ public class TossPaymentClientImpl implements TossPaymentClient {
 
     public TossPaymentClientImpl(
             @Value("${toss.api-base-url:https://api.tosspayments.com}") String apiBaseUrl,
-            @Value("${toss.secret-key:}") String secretKey) {
+            @Value("${toss.secret-key:}") String secretKey,
+            @Value("${toss.connect-timeout-ms:3000}") long connectTimeoutMs,
+            @Value("${toss.read-timeout-ms:5000}") long readTimeoutMs) {
 
         String basic = Base64.getEncoder()
                 .encodeToString((secretKey + ":").getBytes(StandardCharsets.UTF_8));
 
+        // 타임아웃은 선택 설정이 아니라 필수다. 이 호출은 트랜잭션 밖이라 DB 커넥션은 잡지 않지만
+        // (ADR-018), 응답이 오지 않으면 요청 스레드는 계속 붙잡힌다 — 토스가 매달리는 동안 스레드가
+        // 쌓이면 좌석 hold 같은 무관한 경로까지 함께 굶는다. 느린 하류 의존성의 장애 전파는 대기열
+        // (E-1)이 막아주지 못하는 종류라(대기열은 유입 셰이핑) 여기서 상한을 건다.
+        ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.defaults()
+                .withConnectTimeout(Duration.ofMillis(connectTimeoutMs))
+                .withReadTimeout(Duration.ofMillis(readTimeoutMs));
+
         this.restClient = RestClient.builder()
+                .requestFactory(ClientHttpRequestFactoryBuilder.detect().build(settings))
                 .baseUrl(apiBaseUrl)
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Basic " + basic)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)

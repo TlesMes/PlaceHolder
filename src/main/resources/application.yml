@@ -57,3 +57,6 @@ toss:
   # 서버 전용 시크릿 키(절대 노출·커밋 금지). confirm·조회 호출의 Basic Auth에 사용.
   secret-key: ${TOSS_SECRET_KEY:}
   api-base-url: ${TOSS_API_BASE_URL:https://api.tosspayments.com}
+  # 외부 호출 상한. 토스가 응답하지 않을 때 요청 스레드가 무한 점유되는 것을 막는다(ADR-018).
+  connect-timeout-ms: 3000
+  read-timeout-ms: 5000
