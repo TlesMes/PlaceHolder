@@ -9,6 +9,9 @@ import com.placeholder.global.exception.custom.EventNotFoundException;
 import com.placeholder.global.exception.custom.InsufficientPointException;
 import com.placeholder.global.exception.custom.InvalidCredentialsException;
 import com.placeholder.global.exception.custom.InvalidUserRoleException;
+import com.placeholder.global.exception.custom.PaymentAmountMismatchException;
+import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
+import com.placeholder.global.exception.custom.PaymentOrderNotFoundException;
 import com.placeholder.global.exception.custom.QueueAdmissionRequiredException;
 import com.placeholder.global.exception.custom.ReservationNotFoundException;
 import com.placeholder.global.exception.custom.SeatNotAvailableException;
@@ -55,7 +58,7 @@ public class GlobalExceptionHandler {
      * 커스텀 예외 처리 - 리소스 없음
      */
     @ExceptionHandler({EventNotFoundException.class, UserNotFoundException.class, SeatNotFoundException.class,
-            CouponNotFoundException.class})
+            CouponNotFoundException.class, PaymentOrderNotFoundException.class})
     public ResponseEntity<ErrorResponse> handleNotFoundException(RuntimeException ex) {
         ErrorResponse response = ErrorResponse.builder()
                 .code("RESOURCE_NOT_FOUND")
@@ -171,6 +174,32 @@ public class GlobalExceptionHandler {
                 .timestamp(LocalDateTime.now())
                 .build();
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(response);
+    }
+
+    /**
+     * 결제 금액 위변조 — confirm 요청 금액이 주문 시 저장액과 불일치 (ADR-018).
+     */
+    @ExceptionHandler(PaymentAmountMismatchException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentAmountMismatch(PaymentAmountMismatchException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("PAYMENT_AMOUNT_MISMATCH")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.badRequest().body(response);
+    }
+
+    /**
+     * 토스 결제 승인 실패 — 주문은 FAILED로 전이되고 적립되지 않음 (ADR-018).
+     */
+    @ExceptionHandler(PaymentConfirmFailedException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentConfirmFailed(PaymentConfirmFailedException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("PAYMENT_CONFIRM_FAILED")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.badRequest().body(response);
     }
 
     /**

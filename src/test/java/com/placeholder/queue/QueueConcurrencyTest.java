@@ -12,7 +12,6 @@ import com.placeholder.domain.user.repository.UserRepository;
 import com.placeholder.global.exception.custom.QueueAdmissionRequiredException;
 import com.placeholder.global.exception.custom.SeatNotAvailableException;
 import com.placeholder.support.RedisIntegrationTest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,18 +60,7 @@ class QueueConcurrencyTest extends RedisIntegrationTest {
     @Autowired UserRepository userRepository;
     @Autowired StringRedisTemplate redis;
 
-    @AfterEach
-    void flush() {
-        deleteByPattern("queue:*");
-        deleteByPattern("entry:*");
-        deleteByPattern("rate:*");
-        redis.delete("active:all");
-    }
-
-    private void deleteByPattern(String pattern) {
-        var keys = redis.keys(pattern);
-        if (keys != null && !keys.isEmpty()) redis.delete(keys);
-    }
+    // 테스트 간 Redis·deficit 장부 정리는 RedisIntegrationTest가 일괄 수행한다.
 
     @Test
     @DisplayName("스케줄러 동시 실행: 각 대기자는 정확히 한 번만 입장 (ZPOPMIN 원자성)")

@@ -11,7 +11,6 @@ import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
 import com.placeholder.global.exception.custom.QueueAdmissionRequiredException;
 import com.placeholder.support.RedisIntegrationTest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,13 +52,9 @@ class SeatQueryQueueGateTest extends RedisIntegrationTest {
     @Autowired QueueRedisRepository queueRepository;
     @Autowired StringRedisTemplate redis;
 
-    @AfterEach
-    void flushEntryTokens() {
-        var keys = redis.keys("entry:*");
-        if (keys != null && !keys.isEmpty()) {
-            redis.delete(keys);
-        }
-    }
+    // 테스트 간 Redis·deficit 장부 정리는 RedisIntegrationTest가 일괄 수행한다.
+    // (이 클래스가 entry:만 지우고 active:all을 남겨 다음 클래스의 ceiling을 잠식한 것이
+    //  정리를 베이스로 올린 계기다.)
 
     @Test
     @DisplayName("대기열 활성 + 토큰 없음: QueueAdmissionRequiredException")

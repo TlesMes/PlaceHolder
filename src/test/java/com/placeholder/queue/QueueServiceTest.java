@@ -56,19 +56,12 @@ class QueueServiceTest extends RedisIntegrationTest {
     @Autowired CacheManager cacheManager;
     @MockitoSpyBean EventExistenceChecker eventExistenceChecker;
 
+    // Redis·deficit 장부 정리는 RedisIntegrationTest가 일괄 수행한다.
+    // 여기서는 이 클래스에만 있는 공유 상태(Caffeine 캐시·spy 호출 기록)를 되돌린다.
     @AfterEach
     void cleanup() {
-        deleteByPattern("queue:*");
-        deleteByPattern("entry:*");
-        deleteByPattern("rate:*");
-        redis.delete("active:all");
         cacheManager.getCache("eventExists").clear();
         Mockito.reset(eventExistenceChecker);
-    }
-
-    private void deleteByPattern(String pattern) {
-        var keys = redis.keys(pattern);
-        if (keys != null && !keys.isEmpty()) redis.delete(keys);
     }
 
     @Test
