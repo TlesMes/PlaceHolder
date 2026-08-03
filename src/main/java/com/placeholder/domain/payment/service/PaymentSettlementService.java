@@ -65,6 +65,22 @@ public class PaymentSettlementService {
     }
 
     /**
+     * 고아 주문 만료 확정 (대사 새벽 배치 전용). READY 상태에서만 EXPIRED로 전이한다.
+     *
+     * <p>{@link #markFailed}와 같은 패턴 — 비관적 락으로 잠그고 {@code isReady()} 가드를 두어,
+     * 판정과 전이 사이에 confirm/웹훅이 먼저 적립을 끝냈다면 조용히 no-op이 된다(멱등).
+     * 대사가 뒤늦게 정상 결제를 만료시키는 역전을 막는 지점이다.
+     */
+    @Transactional
+    public void markExpired(String orderId) {
+        PaymentOrder order = paymentOrderRepository.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new PaymentOrderNotFoundException("주문을 찾을 수 없습니다"));
+        if (order.isReady()) {
+            order.markExpired();
+        }
+    }
+
+    /**
      * 멱등 적립 — confirm·webhook 공통 수렴점. 주문 행을 비관적 락으로 잠그고,
      * 이미 DONE이면 재적립 없이 현재 잔액만 반환한다. READY면 DONE 전이 + 충전 + CHARGE 기록.
      */

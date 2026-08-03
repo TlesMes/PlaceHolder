@@ -97,7 +97,24 @@ public class PaymentOrder {
         this.status = PaymentStatus.FAILED;
     }
 
+    /**
+     * 고아 주문 만료 처리 — 결제창을 띄우지 않고 이탈해 토스에도 기록이 없는 주문의 종결 (대사 배치).
+     *
+     * <p>{@code FAILED}(토스가 거절)와 구분한다. 이쪽은 "애초에 결제 시도 자체가 없었다"는 뜻이라
+     * 원인 분석·통계에서 섞이면 안 된다. 좌석 hold 만료(ADR-009)와 같은 성격의 청소다.
+     *
+     * <p>⚠️ 성급한 만료는 사고를 만든다 — 주문 생성 직후엔 토스도 아직 그 orderId를 모르므로(404),
+     * 이때 만료시키면 곧이어 결제를 마친 사용자의 confirm이 거부된다(돈은 나갔는데 포인트 없음).
+     * 그래서 이 전이는 충분히 오래된 주문만 다루는 새벽 배치에만 허용한다.
+     */
+    public void markExpired() {
+        if (status != PaymentStatus.READY) {
+            throw new IllegalStateException("READY 상태의 주문만 만료 처리할 수 있습니다: status=" + status);
+        }
+        this.status = PaymentStatus.EXPIRED;
+    }
+
     public enum PaymentStatus {
-        READY, DONE, FAILED
+        READY, DONE, FAILED, EXPIRED
     }
 }
