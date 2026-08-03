@@ -227,21 +227,30 @@ com.placeholder
   - 이탈(새로고침·닫기) 시 대기 순번·좌석 점유가 사라진다는 사실이 페이지 체류 중엔 드러나지 않아, beforeunload 경고(실수 이탈 방지)로도 못 막는 오해가 있었음 → 상시 노출 안내 문구로 보완
   - `CheckoutPage.jsx`/`QueueWaitingPage.jsx`에 안내 문구 각 1줄 추가. 기능 변경 없음(카피 전용), 테스트 추가 없음
 
-- **Phase E-2: 토스페이먼츠 PG 연동 (백엔드)** — PR #22 (`feature/payment-toss-integration`, **PR 생성 2026-07-26, 미머지**, ADR-018)
+- **Phase E-2: 토스페이먼츠 PG 연동 (백엔드)** — PR #22 (`feature/payment-toss-integration`, **머지 완료 2026-07-30**, ADR-018)
   - 로드맵 체크리스트에서 마지막까지 비어 있던 핵심 어필 항목(결제-포인트 정합성/멱등성). 기존 충전은 쿠폰 상환뿐이라 "현금 → 포인트" 경로가 없었음
   - **구조는 OAuth 인가코드 플로우와 동형**(clientKey=client_id, paymentKey=code, secretKey confirm=토큰 교환). 다른 건 **부작용이 비가역적 "돈"**이라는 점뿐 — 이 PR의 안전장치는 전부 거기서 파생
   - **동기 승인(주) + 웹훅(보조) 이중화**: 둘 다 같은 멱등 코어 `PaymentSettlementService.settle`로 수렴. 동기만이면 누락 보정 없고, 웹훅만이면 즉시 반영 안 됨
   - **멱등 = orderId 비관적 락 + "이미 DONE이면 no-op"**(ADR-010 기조 재사용). **금액 위변조 방지** = 주문 생성 시 서버가 amount 확정 저장 후 confirm 요청액과 대조
   - **트랜잭션 경계(핵심):** 토스 호출을 `@Transactional` 안에 두면 네트워크 지연만큼 커넥션 점유 + 락 보유 중 데드락 위험 → ①검증(락 없이 fail-fast) → ②**트랜잭션 밖** 토스 호출 → ③멱등 적립(짧은 단일 tx)로 분리. self-invocation 무효화 회피를 위해 트랜잭션 메서드는 별도 빈에 집중
   - **웹훅은 permitAll이되 페이로드 불신** — paymentKey로 토스 재조회해 실제 DONE일 때만 적립(위조 웹훅 방어). `TossPaymentClient` 인터페이스로 외부 I/O 추상화(RestClient 구현)
-  - 테스트 116 통과(기존 104 + 신규 12). 멱등(confirm 2회→적립 1회)·**confirm×웹훅 동시 경합→적립 정확히 1회**(`@RepeatedTest(5)`, C-4·쿠폰 exactly-K와 동종)·금액 위변조 거부·승인 실패→FAILED·웹훅 위조 방어
+  - **느린 외부 의존성 격리:** RestClient에 connect 3s / read 5s 타임아웃(ADR-018 5번). 승인 호출은 트랜잭션 밖이라 DB 커넥션은 안 잡지만 응답이 없으면 요청 스레드가 무한 점유돼, 하류 지연이 좌석 hold 등 무관한 경로로 전파된다 — **대기열(E-1)이 막지 못하는 장애 유형**(대기열은 유입 셰이핑). 응답 없는 소켓 서버로 발동 검증(단정문에 하한+상한 둬 즉시실패 통과 배제)
+  - 테스트 117 통과(기존 104 + 결제 12 + 타임아웃 1). 멱등(confirm 2회→적립 1회)·**confirm×웹훅 동시 경합→적립 정확히 1회**(`@RepeatedTest(5)`, C-4·쿠폰 exactly-K와 동종)·금액 위변조 거부·승인 실패→FAILED·웹훅 위조 방어
   - **로컬 스모크(실서버 curl):** orders 200+DB READY 저장 확인 / confirm은 실제 `api.tosspayments.com`까지 도달해 진짜 `401 UNAUTHORIZED_KEY` 수신 → FAILED 전이·잔액 0·PointTransaction 0건(적립 안 샘) 확인
-  - ⚠️ **범위 밖:** 프론트 충전 UI(결제창 여는 페이지 + `successUrl` 콜백 페이지) 미구현 → 사용자 관점에선 아직 결제창이 뜨지 않음. 토스 테스트 키 미발급이라 실 샌드박스 E2E도 미검증(목킹으로 대체, 키 주입만 하면 동작)
+  - **함께 수정한 기존 결함(프로덕션 무관):** 대기열 게이트 테스트 2종이 `active:all`(ZSET, TTL 없음)을 정리하지 않아 다음 클래스의 전역 ceiling 슬롯을 잠식 → CI에서 "정확히 1 모자람"으로 발현(PR #13/#19 시절 잠복, 결제 테스트 추가로 실행 순서가 바뀌며 노출). 개별 수정 후 **정리를 `RedisIntegrationTest` 베이스로 일원화**(FLUSHDB + deficit 장부 초기화) — 키 목록 복붙 방식 자체를 제거. 음성 대조군(정리 끄면 9건 실패 재현)·`@AfterEach` 순서 프로브·역순 전체 실행으로 검증
+  - ⚠️ **범위 밖:** 프론트 충전 UI는 후속 PR #23. 토스 테스트 키 미발급이라 실 샌드박스 E2E 미검증(목킹 대체, 키 주입만 하면 동작). **생애주기 축(취소·환불·대사·비동기수단·고아주문)은 통째로 미구현** → 아래 결제 백로그
+
+- **Phase E-2: 프론트 충전 UI** — PR #23 (`feature/payment-frontend-ui`, **PR 생성 2026-07-30, 미머지**)
+  - PR #22가 API만 만들고 사용자 진입점이 없어 결제가 시작조차 되지 않던 상태를 해소. 구조는 백엔드와 같이 **OAuth 콜백과 동형** — 충전 페이지가 `orders`로 orderId·clientKey를 받아 토스 SDK 결제창을 열고, 토스가 `successUrl`로 리다이렉트한 쿼리스트링(paymentKey·orderId·amount)을 콜백 페이지가 파싱해 `confirm`으로 넘긴다(승인 권한은 서버 시크릿 키에만 → 프론트는 값 전달만)
+  - 신규: `PointChargePage`(`/points/charge`), `PaymentSuccessPage`(`/payments/success`), `PaymentFailPage`(`/payments/fail`), `lib/tossSdk.js`(CDN 동적 로드 — 결제 무관 페이지에서 외부 스크립트 미수신), `api/payments.js`, 헤더 "충전" 링크, 결제 에러 메시지 2종
+  - clientKey 미설정 시 `NO_CLIENT_KEY` 조기 실패 → 키 발급 안내 노출(키 없이도 주문 생성까지는 동작). 콜백 새로고침 시 confirm 재호출은 서버 멱등이라 안전, `useRef`로 StrictMode 이중 마운트 방지
+  - **브라우저 E2E 검증**(백엔드+프론트+MySQL 실기동, 콘솔 에러 0): 충전 버튼→`POST /orders` 200·DB `30000/READY` 저장 / **금액 999로 위조한 콜백 → 거부 + DB `READY` 유지**(토스 호출 전 차단) / 정상 콜백 → confirm 400·`FAILED`·잔액 0·적립 0건 / `USER_CANCEL` 안내. 목킹으로 증명한 위변조 방어·무적립이 실제 브라우저 흐름에서 재현됨
+  - ⚠️ 실제 결제창은 아직 안 뜸(키 미발급). successUrl 콜백은 토스가 보낼 쿼리스트링을 흉내 내 검증 — 파싱→confirm→렌더 경로는 실증됐으나 실제 리다이렉트 도달은 키 확보 후 확인 필요. 결제수단 카드 고정
 
 ### 현재 상태
-- **작업 브랜치:** `feature/payment-toss-integration` (E-2 백엔드 완료, **PR #22 리뷰 대기**)
-- **마지막 main 커밋:** `Merge pull request #21` (914558a)
-  - PR #1~11, #13~21 머지 완료 / **PR #22(E-2 결제 백엔드) 미머지**
+- **작업 브랜치:** `feature/payment-frontend-ui` (**PR #23 리뷰 대기**)
+- **마지막 main 커밋:** `Merge pull request #22` (7c50bf2)
+  - PR #1~11, #13~22 머지 완료 / **PR #23(E-2 프론트 충전 UI) 미머지**
   - E-3(조회 API + 프론트 연결 + 부호 버그 수정 + 서비스 테스트 16종) 완료
   - **E-1 대기열 전 구간 머지 완료:** 백엔드(#13, 06-27) + 프론트·입장재설계(#14, 06-29) + enter/status 캐싱(#15, 06-30, ADR-014) + confirm 토큰 회수(#16, 07-03) + 이탈 세션 회수(#17, 07-04, ADR-015) + 좌석 hold 반환(#18, 07-05, ADR-016) + A안 게이트 이동(#19, 07-05, ADR-013 개정) + 이벤트 간 균등 RR 분배(#20, 07-06, ADR-017) + 이탈 안내 문구(#21, 07-07)
 - **실행 가능 API:**
@@ -262,12 +271,13 @@ com.placeholder
   - **POST /api/payments/confirm** - 동기 승인 → 포인트 적립(멱등) (BOOKER) ★ E-2
   - **POST /api/payments/webhook** - 토스 웹훅 보조 경로(permitAll, 재조회 검증) ★ E-2
   - POST /api/loadtest/coupons - 쿠폰 생성 (**loadtest 프로파일 전용**, 운영 404)
-- **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용.
+- **프론트엔드:** frontend/ (React+Vite+Tailwind). `cd frontend && npm install && npm run dev` → :5173. CORS는 WebConfig가 :5173 허용. 결제 페이지 3종(`/points/charge`, `/payments/success`, `/payments/fail`)은 PR #23 ★ E-2
 
 ### 다음 작업 (우선순위 순)
-1. **E-2 프론트 충전 UI** (착수 중) — 충전 페이지(금액 입력 → `orders` 호출 → 토스 SDK 결제창) + `successUrl`/`failUrl` 콜백 페이지(쿼리스트링 paymentKey·orderId·amount 파싱 → `confirm` 호출). **토스 clientKey 없이도 골격은 구현 가능**, 실제 결제창 렌더는 키 발급 후.
-2. **토스 테스트 키 발급**(사용자 작업) → 목킹을 실호출로 교체하면 E-2 실 샌드박스 E2E 완결.
-3. 나머지는 아래 대기열 백로그 — 실측 계열(2·3번)은 인프라 의존, 인프라 없이 가능한 건 1번(가중치·프리패스)과 UX 신호(4번).
+1. **PR #23 리뷰·머지** — E-2 프론트 충전 UI.
+2. **토스 테스트 키 발급**(사용자 작업) → `TOSS_CLIENT_KEY`/`TOSS_SECRET_KEY` env 주입하면 실제 결제창이 뜨고 목킹을 실호출로 교체 가능 → **E-2 실 샌드박스 E2E 완결**. 코드는 이미 준비됨.
+3. **결제 생애주기 착수 판단** — 아래 결제 백로그. 1·2번(취소·환불, 대사)이 "포인트 충전을 구현했다"고 말하기 위한 최소 잔여분.
+4. 나머지는 대기열 백로그 — 실측 계열(2·3번)은 인프라 의존.
 
 ### 백로그 — 대기열 (우선순위 순)
 > PR #14에서 E-1 입장 제어를 다듬으며 식별. 지금은 단일 인스턴스 전제로 충분. (~~confirm 토큰 반환~~ #16, ~~이탈 세션 회수~~ #17, ~~기아 방지 균등 분배~~ #20, ~~이탈 안내 문구~~ #21 완료)

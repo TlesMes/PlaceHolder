@@ -12,6 +12,9 @@ import CheckoutPage from './pages/CheckoutPage';
 import MyPage from './pages/MyPage';
 import SettlementPage from './pages/SettlementPage';
 import QueueWaitingPage from './pages/QueueWaitingPage';
+import PointChargePage from './pages/PointChargePage';
+import PaymentSuccessPage from './pages/PaymentSuccessPage';
+import PaymentFailPage from './pages/PaymentFailPage';
 
 export default function App() {
   return (
@@ -60,6 +63,31 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="BOOKER">
                   <MyPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/points/charge"
+              element={
+                <ProtectedRoute requiredRole="BOOKER">
+                  <PointChargePage />
+                </ProtectedRoute>
+              }
+            />
+            {/* 토스 결제창 콜백 (successUrl/failUrl). OAuth redirect_uri 콜백과 같은 자리. */}
+            <Route
+              path="/payments/success"
+              element={
+                <ProtectedRoute requiredRole="BOOKER">
+                  <PaymentSuccessPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/payments/fail"
+              element={
+                <ProtectedRoute requiredRole="BOOKER">
+                  <PaymentFailPage />
                 </ProtectedRoute>
               }
             />

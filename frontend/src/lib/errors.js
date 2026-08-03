@@ -7,6 +7,8 @@ const CODE_MESSAGE = {
   RESERVATION_NOT_FOUND: '예약 정보를 찾을 수 없습니다.',
   INVALID_CREDENTIALS: '이메일 또는 비밀번호가 올바르지 않습니다.',
   DUPLICATE_EMAIL: '이미 가입된 이메일입니다.',
+  PAYMENT_AMOUNT_MISMATCH: '결제 금액이 주문 금액과 일치하지 않습니다.',
+  PAYMENT_CONFIRM_FAILED: '결제 승인에 실패했습니다. 카드사 응답을 확인해주세요.',
 };
 
 export function toMessage(err, fallback = '요청을 처리하지 못했습니다.') {
