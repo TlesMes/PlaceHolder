@@ -1,12 +1,16 @@
 package com.placeholder.domain.payment.repository;
 
 import com.placeholder.domain.payment.entity.PaymentOrder;
+import com.placeholder.domain.payment.entity.PaymentOrder.PaymentStatus;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, Long> {
@@ -22,4 +26,14 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, Long
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from PaymentOrder p where p.orderId = :orderId")
     Optional<PaymentOrder> findByOrderIdForUpdate(@Param("orderId") String orderId);
+
+    /**
+     * 대사 후보 조회 — 지정 구간에 생성된 특정 상태의 주문을 오래된 순으로 가져온다.
+     *
+     * <p>락 없이 읽는다. 실제 상태 전이는 건별로 {@code findByOrderIdForUpdate}가 다시 잠그므로
+     * 여기서 잠글 필요가 없고, 잠그면 외부 토스 호출 동안 락을 쥐게 되어 ADR-018 트랜잭션 경계
+     * 원칙을 깬다. 오래된 순 정렬 + Pageable로 한 번에 처리할 건수를 제한한다.
+     */
+    List<PaymentOrder> findByStatusAndCreatedAtBetweenOrderByCreatedAtAsc(
+            PaymentStatus status, LocalDateTime from, LocalDateTime to, Pageable pageable);
 }

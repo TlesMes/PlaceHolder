@@ -60,3 +60,15 @@ toss:
   # 외부 호출 상한. 토스가 응답하지 않을 때 요청 스레드가 무한 점유되는 것을 막는다(ADR-018).
   connect-timeout-ms: 3000
   read-timeout-ms: 5000
+
+payment:
+  # 대사 — 동기 승인과 웹훅이 둘 다 실패한 결제를 주기적으로 찾아 보정한다 (ADR-018 삼중화)
+  reconciliation:
+    enabled: true
+    interval-ms: 300000        # 보정 잡 주기 5분. 누락 결제는 빨리 고칠수록 좋다
+    min-age-minutes: 5         # 이보다 최근 주문은 결제 진행 중일 수 있어 제외
+    max-age-hours: 2           # 이보다 오래되면 사실상 고아 → 새벽 배치 소관(반복 조회 낭비 방지)
+    batch-size: 100            # 한 번에 처리할 최대 건수(외부 호출 폭주 방지)
+    # 고아 주문 만료는 새벽 배치에만 허용한다. 성급한 만료는 정상 결제를 거부하게 만들기 때문(ADR-018)
+    expiry-cron: "0 0 4 * * *" # 새벽 4시 (스케줄러가 zone=Asia/Seoul 명시 — UTC 서버 함정 방지)
+    expiry-age-hours: 24

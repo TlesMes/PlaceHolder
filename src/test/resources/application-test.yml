@@ -32,3 +32,10 @@ queue:
     # 또한 Redis 없는 컨텍스트(MySQLIntegrationTest)에서 매초 연결 오류가 나지 않도록
     # 자동 발화를 사실상 비활성화한다.
     scan-interval-ms: 3600000
+
+payment:
+  reconciliation:
+    # 테스트는 PaymentReconciliationService.reconcile()을 직접 호출해 결정적으로 검증한다.
+    # 스케줄러 빈 자체를 만들지 않아 자동 발화가 테스트에 끼어들 여지를 없앤다
+    # (fixedDelay는 주기를 크게 잡아도 컨텍스트 기동 직후 1회 발화하므로 주기 조정으로는 부족하다).
+    enabled: false

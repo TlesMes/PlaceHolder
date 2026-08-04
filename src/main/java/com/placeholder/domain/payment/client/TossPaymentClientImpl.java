@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 토스페이먼츠 실제 REST 호출 구현 (Spring Boot 내장 {@link RestClient}, 별도 의존성 없음).
@@ -80,6 +81,19 @@ public class TossPaymentClientImpl implements TossPaymentClient {
                 .retrieve()
                 .body(TossPaymentResponse.class);
         return toResult(res);
+    }
+
+    @Override
+    public Optional<TossPaymentResult> findByOrderId(String orderId) {
+        // 404 = "토스에 이 주문 기록이 없다"는 정상적인 상태 구분(결제창 미오픈)이라 예외로 올리지 않는다.
+        // 기본 동작은 4xx를 예외로 던지므로 onStatus로 가로채 빈 본문을 반환하게 한다.
+        TossPaymentResponse res = restClient.get()
+                .uri("/v1/payments/orders/{orderId}", orderId)
+                .retrieve()
+                .onStatus(status -> status.value() == 404, (request, response) -> { })
+                .body(TossPaymentResponse.class);
+
+        return Optional.ofNullable(res).map(this::toResult);
     }
 
     private TossPaymentResult toResult(TossPaymentResponse res) {
