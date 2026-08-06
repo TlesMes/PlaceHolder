@@ -7,6 +7,7 @@ import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -86,14 +87,23 @@ public class TossPaymentClientImpl implements TossPaymentClient {
     @Override
     public Optional<TossPaymentResult> findByOrderId(String orderId) {
         // 404 = "토스에 이 주문 기록이 없다"는 정상적인 상태 구분(결제창 미오픈)이라 예외로 올리지 않는다.
-        // 기본 동작은 4xx를 예외로 던지므로 onStatus로 가로채 빈 본문을 반환하게 한다.
-        TossPaymentResponse res = restClient.get()
+        // 기본 동작은 4xx를 예외로 던지므로 onStatus로 가로채고, 그 외 상태는 그대로 예외를 유지한다
+        // (토스 5xx를 '주문 없음'으로 오해해 고아로 종결하면 안 되기 때문).
+        //
+        // ⚠️ 상태 코드를 반드시 직접 확인해야 한다. 토스의 404에는 본문이 실려 오는데
+        //    ({"code":"NOT_FOUND_PAYMENT","message":...}), 이를 그대로 역직렬화하면 필드가 전부 빈
+        //    객체가 만들어져 "결제가 존재한다"로 오인된다. 그러면 만료 잡이 고아 주문을 영영 종결하지
+        //    못한다 — 실제로 그렇게 동작하던 것을 스텁 서버 테스트로 잡았다.
+        ResponseEntity<TossPaymentResponse> response = restClient.get()
                 .uri("/v1/payments/orders/{orderId}", orderId)
                 .retrieve()
-                .onStatus(status -> status.value() == 404, (request, response) -> { })
-                .body(TossPaymentResponse.class);
+                .onStatus(status -> status.value() == 404, (request, res) -> { })
+                .toEntity(TossPaymentResponse.class);
 
-        return Optional.ofNullable(res).map(this::toResult);
+        if (response.getStatusCode().value() == 404) {
+            return Optional.empty();
+        }
+        return Optional.of(toResult(response.getBody()));
     }
 
     private TossPaymentResult toResult(TossPaymentResponse res) {
