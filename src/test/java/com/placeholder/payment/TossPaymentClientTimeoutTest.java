@@ -1,6 +1,7 @@
 package com.placeholder.payment;
 
 import com.placeholder.domain.payment.client.TossPaymentClientImpl;
+import com.placeholder.global.exception.custom.PaymentCancelFailedException;
 import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -75,5 +76,25 @@ class TossPaymentClientTimeoutTest {
         //       "즉시 실패"하는 경우에도 테스트가 통과해 타임아웃 동작을 증명하지 못한다.
         // 상한: 타임아웃이 없으면 영원히 매달리므로, 상한 위반은 곧 미설정을 뜻한다.
         assertThat(elapsed).isGreaterThanOrEqualTo(900).isLessThan(10_000);
+    }
+
+    @Test
+    @DisplayName("타임아웃이 전송 단계와 겹쳐도 도메인 예외로 번역된다 (CancellationException 누출 없음)")
+    void timeoutDuringSend_stillTranslatedToDomainException() {
+        String baseUrl = "http://localhost:" + serverSocket.getLocalPort();
+
+        // 읽기 타임아웃을 극단적으로 좁혀 '요청 전송 중 취소'를 강제한다. 이 구간에서 JDK HttpClient는
+        // CompletableFuture.cancel()로 중단하는데, 그때 나오는 CancellationException은
+        // RestClientException이 아니다 — RestClientException만 잡으면 그대로 새어 나가고,
+        // confirm의 실패 처리(markFailed)가 건너뛰어져 주문이 READY로 남는다.
+        // 경합이라 매번 발현하지 않으므로 여러 번 시도해 구간을 확실히 통과시킨다.
+        for (int i = 0; i < 30; i++) {
+            TossPaymentClientImpl client = new TossPaymentClientImpl(baseUrl, "test_secret", 1_000, 1);
+
+            assertThatThrownBy(() -> client.confirm("pk_1", "order_1", 10_000))
+                    .isInstanceOf(PaymentConfirmFailedException.class);
+            assertThatThrownBy(() -> client.cancel("pk_1", "사유", 10_000, "idem-1"))
+                    .isInstanceOf(PaymentCancelFailedException.class);
+        }
     }
 }
