@@ -23,6 +23,19 @@ public interface TossPaymentClient {
     TossPaymentResult getPayment(String paymentKey);
 
     /**
+     * 결제 취소(부분 취소 포함) — 시크릿 키로 호출한다 (ADR-019).
+     *
+     * <p>{@code idempotencyKey}는 토스 측 중복 취소 방어다. 우리 쪽은 주문 행 비관적 락으로 동시
+     * 취소를 막지만, 그것만으로는 <b>네트워크 재시도</b>를 못 막는다 — 토스가 취소를 처리한 뒤
+     * 응답이 유실되어 우리가 재시도하면 같은 금액이 두 번 취소될 수 있다. 같은 키로 온 요청에
+     * 토스가 첫 결과를 재생하도록 해서 이 창을 닫는다.
+     *
+     * @param cancelAmount 취소 금액(원). 결제 잔액 전체를 취소하려면 잔액과 같은 값을 넣는다.
+     * @return 취소 반영 후의 결제 상태 (전액 취소면 {@code CANCELED}, 일부면 {@code PARTIAL_CANCELED})
+     */
+    TossPaymentResult cancel(String paymentKey, String cancelReason, int cancelAmount, String idempotencyKey);
+
+    /**
      * <b>orderId로</b> 결제 조회 — 대사(reconciliation)의 축이 되는 메서드.
      *
      * <p>누락된 주문은 {@code status=READY}라 {@code paymentKey}가 아직 null이다(승인 성공 시에만 기록).

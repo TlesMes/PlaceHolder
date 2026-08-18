@@ -12,10 +12,11 @@ import java.time.LocalDateTime;
  * <p>주문 생성 시점에 서버가 {@code amount}를 확정 저장한다. 이후 confirm/웹훅이 들고 오는 금액은
  * 이 저장값과 대조해 위변조를 막는다(클라이언트가 보낸 금액을 신뢰하지 않는다).
  *
- * <p>상태는 {@code READY → DONE} (승인·적립 완료) 또는 {@code READY → FAILED} (승인 실패)로만
- * 전이한다. 종결 상태(DONE/FAILED)에서 재전이는 거부한다. 상태 변경은 도메인 메서드로만 수행한다
- * (setter 금지). confirm(동기)과 webhook(보조)이 같은 orderId로 동시에 도착해도, 비관적 락
- * ({@code findByOrderIdForUpdate}) 보유자만 READY→DONE 전이를 하므로 포인트는 정확히 1회 적립된다.
+ * <p>상태는 {@code READY → DONE} (승인·적립 완료) 또는 {@code READY → FAILED} (승인 실패)로 전이하고,
+ * 확정된 주문은 취소로 {@code DONE → PARTIAL_CANCELED → CANCELED}까지 이어질 수 있다 (ADR-019).
+ * 그 외 재전이는 거부한다. 상태 변경은 도메인 메서드로만 수행한다 (setter 금지). confirm(동기)과
+ * webhook(보조)이 같은 orderId로 동시에 도착해도, 비관적 락({@code findByOrderIdForUpdate}) 보유자만
+ * READY→DONE 전이를 하므로 포인트는 정확히 1회 적립된다.
  */
 @Entity
 @Table(
@@ -61,6 +62,27 @@ public class PaymentOrder {
     @Column(name = "approved_at")
     private LocalDateTime approvedAt;
 
+    /**
+     * 누적 취소 금액(원). 부분 취소를 여러 번 할 수 있으므로 단일 플래그가 아니라 누계로 관리한다.
+     * {@code canceledAmount == amount}이면 전액 취소(CANCELED), 그 미만이면 PARTIAL_CANCELED.
+     */
+    @Builder.Default
+    @Column(name = "canceled_amount", nullable = false)
+    private int canceledAmount = 0;
+
+    /** 마지막 취소 <b>기록</b> 시각 — 포인트를 회수한 시점(토스 취소 성공 여부와 무관). */
+    @Column(name = "canceled_at")
+    private LocalDateTime canceledAt;
+
+    /**
+     * 토스 취소가 <b>실제로 확인된</b> 시각. {@code canceledAt}과 분리한 이유가 이 필드의 존재 이유다 —
+     * 우리 DB는 취소로 기록됐는데 토스 취소 호출 결과를 확인하기 전에 서버가 죽으면
+     * "포인트만 회수되고 돈은 안 돌아간" 상태가 된다. 그 창을 나중에 식별하려면
+     * "기록했다"와 "상대도 확인했다"를 구분해 남겨야 한다(역방향 대사의 후보 조건).
+     */
+    @Column(name = "cancel_confirmed_at")
+    private LocalDateTime cancelConfirmedAt;
+
     @PrePersist
     private void prePersist() {
         this.createdAt = LocalDateTime.now();
@@ -72,6 +94,20 @@ public class PaymentOrder {
 
     public boolean isReady() {
         return status == PaymentStatus.READY;
+    }
+
+    /**
+     * 이미 적립이 완료된 이력이 있는가 — 멱등 판정용.
+     *
+     * <p>{@link #isDone()}만으로는 부족하다: 취소된 주문(CANCELED/PARTIAL_CANCELED)도 <b>한 번은
+     * 적립됐던</b> 주문이다. 취소 후 뒤늦게 도착한 웹훅이 {@code isDone()==false}를 보고 재적립을
+     * 시도하면 이미 환불한 포인트를 되돌려주게 된다. 적립 여부는 "DONE인가"가 아니라
+     * "READY를 벗어나 승인된 적이 있는가"로 판정해야 한다.
+     */
+    public boolean isSettled() {
+        return status == PaymentStatus.DONE
+                || status == PaymentStatus.PARTIAL_CANCELED
+                || status == PaymentStatus.CANCELED;
     }
 
     /**
@@ -114,7 +150,66 @@ public class PaymentOrder {
         this.status = PaymentStatus.EXPIRED;
     }
 
+    /** 취소 가능한 상태인가 — 승인 완료됐고 아직 전액 취소되지 않았다. */
+    public boolean isCancelable() {
+        return status == PaymentStatus.DONE || status == PaymentStatus.PARTIAL_CANCELED;
+    }
+
+    /** 아직 취소되지 않고 남아 있는 결제 금액(원). 이 주문에서 환불 가능한 상한. */
+    public int remainingAmount() {
+        return amount - canceledAmount;
+    }
+
+    /** 취소 기한(승인 시각 + {@code days}) 이내인가. 전자상거래법 청약철회 기간 반영 (ADR-019). */
+    public boolean isWithinCancelPeriod(LocalDateTime now, int days) {
+        return approvedAt != null && !now.isAfter(approvedAt.plusDays(days));
+    }
+
+    /**
+     * 취소 기록 — <b>포인트 회수와 같은 트랜잭션에서</b> 먼저 호출한다 (ADR-019 보상 순서).
+     *
+     * <p>토스 취소 성공을 기다렸다가 상태를 바꾸면, 그 사이에 들어온 두 번째 취소 요청이 잔여액을
+     * 다시 계산해 <b>토스에 중복 취소를 날린다.</b> 상태 전이 자체가 동시 취소의 방어선이므로
+     * 외부 호출보다 먼저 기록하고, 실패하면 {@link #revertCancel(int)}로 되돌린다.
+     */
+    public void markCanceled(int cancelAmount) {
+        if (!isCancelable()) {
+            throw new IllegalStateException("취소할 수 없는 주문 상태입니다: status=" + status);
+        }
+        if (cancelAmount <= 0 || cancelAmount > remainingAmount()) {
+            throw new IllegalArgumentException(
+                    "취소 금액이 잘못되었습니다: cancelAmount=" + cancelAmount + ", remaining=" + remainingAmount());
+        }
+        this.canceledAmount += cancelAmount;
+        this.canceledAt = LocalDateTime.now();
+        this.status = (this.canceledAmount == this.amount)
+                ? PaymentStatus.CANCELED : PaymentStatus.PARTIAL_CANCELED;
+    }
+
+    /**
+     * 취소 기록 롤백 (보상) — 토스 취소 호출이 실패했을 때 {@link #markCanceled} 이전 상태로 되돌린다.
+     * 포인트 복구와 같은 트랜잭션에서 호출한다. 취소가 0으로 돌아가면 DONE으로 복귀한다.
+     */
+    public void revertCancel(int cancelAmount) {
+        if (cancelAmount <= 0 || cancelAmount > this.canceledAmount) {
+            throw new IllegalArgumentException(
+                    "되돌릴 취소 금액이 잘못되었습니다: cancelAmount=" + cancelAmount
+                            + ", canceledAmount=" + this.canceledAmount);
+        }
+        this.canceledAmount -= cancelAmount;
+        this.status = (this.canceledAmount == 0)
+                ? PaymentStatus.DONE : PaymentStatus.PARTIAL_CANCELED;
+        if (this.canceledAmount == 0) {
+            this.canceledAt = null;
+        }
+    }
+
+    /** 토스 취소가 실제로 확인됨. 여기까지 와야 "돈이 돌아갔다"고 말할 수 있다. */
+    public void confirmCancel() {
+        this.cancelConfirmedAt = LocalDateTime.now();
+    }
+
     public enum PaymentStatus {
-        READY, DONE, FAILED, EXPIRED
+        READY, DONE, FAILED, EXPIRED, PARTIAL_CANCELED, CANCELED
     }
 }

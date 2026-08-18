@@ -1,5 +1,6 @@
 package com.placeholder.domain.payment.client;
 
+import com.placeholder.global.exception.custom.PaymentCancelFailedException;
 import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -72,6 +73,25 @@ public class TossPaymentClientImpl implements TossPaymentClient {
             return toResult(res);
         } catch (RestClientException e) {
             throw new PaymentConfirmFailedException("토스 결제 승인 호출 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public TossPaymentResult cancel(String paymentKey, String cancelReason, int cancelAmount,
+                                    String idempotencyKey) {
+        try {
+            TossPaymentResponse res = restClient.post()
+                    .uri("/v1/payments/{paymentKey}/cancel", paymentKey)
+                    .header("Idempotency-Key", idempotencyKey)
+                    .body(Map.of(
+                            "cancelReason", cancelReason,
+                            "cancelAmount", cancelAmount))
+                    .retrieve()
+                    .body(TossPaymentResponse.class);
+            return toResult(res);
+        } catch (RestClientException e) {
+            // 취소 실패는 삼키지 않는다 — 호출 측이 이 예외를 받아 선회수한 포인트를 복구해야 한다(ADR-019).
+            throw new PaymentCancelFailedException("토스 결제 취소 호출 실패: " + e.getMessage(), e);
         }
     }
 
