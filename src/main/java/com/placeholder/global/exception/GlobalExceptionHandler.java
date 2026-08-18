@@ -10,6 +10,8 @@ import com.placeholder.global.exception.custom.InsufficientPointException;
 import com.placeholder.global.exception.custom.InvalidCredentialsException;
 import com.placeholder.global.exception.custom.InvalidUserRoleException;
 import com.placeholder.global.exception.custom.PaymentAmountMismatchException;
+import com.placeholder.global.exception.custom.PaymentCancelFailedException;
+import com.placeholder.global.exception.custom.PaymentCancelNotAllowedException;
 import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
 import com.placeholder.global.exception.custom.PaymentOrderNotFoundException;
 import com.placeholder.global.exception.custom.QueueAdmissionRequiredException;
@@ -200,6 +202,33 @@ public class GlobalExceptionHandler {
                 .timestamp(LocalDateTime.now())
                 .build();
         return ResponseEntity.badRequest().body(response);
+    }
+
+    /**
+     * 결제 취소 불가 — 상태·기한·환불 가능액 조건 미충족 (ADR-019). 요청이 잘못된 것이므로 400.
+     */
+    @ExceptionHandler(PaymentCancelNotAllowedException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentCancelNotAllowed(PaymentCancelNotAllowedException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("PAYMENT_CANCEL_NOT_ALLOWED")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.badRequest().body(response);
+    }
+
+    /**
+     * 토스 취소 호출 실패 (ADR-019). 우리 잘못도 사용자 잘못도 아닌 하류 의존성 실패이므로 502.
+     * 이 응답을 받았다면 포인트는 이미 복구된 상태다(보상 트랜잭션 완료).
+     */
+    @ExceptionHandler(PaymentCancelFailedException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentCancelFailed(PaymentCancelFailedException ex) {
+        ErrorResponse response = ErrorResponse.builder()
+                .code("PAYMENT_CANCEL_FAILED")
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(response);
     }
 
     /**

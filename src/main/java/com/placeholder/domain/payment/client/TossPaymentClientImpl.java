@@ -1,5 +1,6 @@
 package com.placeholder.domain.payment.client;
 
+import com.placeholder.global.exception.custom.PaymentCancelFailedException;
 import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,7 +11,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -26,6 +26,12 @@ import java.util.Optional;
  *
  * <p>키가 비어 있으면(로컬·CI에 미발급) 실제 호출은 인증 실패하지만, 통합 테스트는 {@link TossPaymentClient}를
  * 목킹해 이 빈을 대체하므로 무관하다. 실 샌드박스 키 확보 후 env로 주입하면 그대로 동작한다(ADR-018).
+ *
+ * <p><b>전송 실패는 예외 타입을 가리지 않고 도메인 예외로 번역한다.</b> {@code RestClientException}만
+ * 잡으면 새는 경로가 있다 — 읽기 타임아웃이 요청 전송 단계와 겹치면 JDK HttpClient가
+ * {@code CompletableFuture.cancel()}로 중단하는데, 이때 나오는 {@code CancellationException}은
+ * {@code RestClientException}이 아니어서 그대로 빠져나간다. 그러면 호출 측(confirm)의 실패 처리가
+ * 건너뛰어져 승인 실패 주문이 READY로 남고 사용자에겐 500이 나간다.
  */
 @Slf4j
 @Component
@@ -70,8 +76,29 @@ public class TossPaymentClientImpl implements TossPaymentClient {
                     .retrieve()
                     .body(TossPaymentResponse.class);
             return toResult(res);
-        } catch (RestClientException e) {
-            throw new PaymentConfirmFailedException("토스 결제 승인 호출 실패: " + e.getMessage(), e);
+        } catch (PaymentConfirmFailedException e) {
+            throw e;   // 이미 우리 예외(빈 본문 등) — 이중 포장하지 않는다
+        } catch (RuntimeException e) {
+            throw new PaymentConfirmFailedException("토스 결제 승인 호출 실패: " + e, e);
+        }
+    }
+
+    @Override
+    public TossPaymentResult cancel(String paymentKey, String cancelReason, int cancelAmount,
+                                    String idempotencyKey) {
+        try {
+            TossPaymentResponse res = restClient.post()
+                    .uri("/v1/payments/{paymentKey}/cancel", paymentKey)
+                    .header("Idempotency-Key", idempotencyKey)
+                    .body(Map.of(
+                            "cancelReason", cancelReason,
+                            "cancelAmount", cancelAmount))
+                    .retrieve()
+                    .body(TossPaymentResponse.class);
+            return toResult(res);
+        } catch (RuntimeException e) {
+            // 취소 실패는 삼키지 않는다 — 호출 측이 이 예외를 받아 선회수한 포인트를 복구해야 한다(ADR-019).
+            throw new PaymentCancelFailedException("토스 결제 취소 호출 실패: " + e, e);
         }
     }
 

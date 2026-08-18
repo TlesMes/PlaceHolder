@@ -18,6 +18,7 @@ const TYPE_FILTERS = [
   { value: 'CHARGE', label: '충전' },
   { value: 'DEDUCT', label: '사용' },
   { value: 'SETTLE', label: '정산' },
+  { value: 'REFUND', label: '환불' },
 ];
 
 // 거래 타입별 색상/부호 표현
@@ -25,6 +26,8 @@ const TYPE_META = {
   CHARGE: { label: '충전', sign: '+', text: 'text-success', badge: 'bg-success-soft text-success-soft-fg' },
   DEDUCT: { label: '사용', sign: '-', text: 'text-danger', badge: 'bg-danger-soft text-danger-soft-fg' },
   SETTLE: { label: '정산', sign: '+', text: 'text-primary', badge: 'bg-primary-soft text-primary-soft-fg' },
+  // 결제 취소로 회수된 포인트 — 사용(DEDUCT)과 섞이면 이력이 사실을 말하지 못한다
+  REFUND: { label: '환불', sign: '-', text: 'text-danger', badge: 'bg-danger-soft text-danger-soft-fg' },
 };
 
 const TABS = [

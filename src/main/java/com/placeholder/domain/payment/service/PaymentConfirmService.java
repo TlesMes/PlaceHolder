@@ -3,7 +3,6 @@ package com.placeholder.domain.payment.service;
 import com.placeholder.domain.payment.client.TossPaymentClient;
 import com.placeholder.domain.payment.client.TossPaymentResult;
 import com.placeholder.domain.payment.dto.PaymentConfirmResponse;
-import com.placeholder.domain.payment.entity.PaymentOrder.PaymentStatus;
 import com.placeholder.domain.payment.service.PaymentSettlementService.SettleResult;
 import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
 import lombok.RequiredArgsConstructor;
@@ -56,7 +55,7 @@ public class PaymentConfirmService {
                 .orderId(orderId)
                 .chargedAmount(settled.chargedAmount())
                 .balance(settled.balance())
-                .status(PaymentStatus.DONE.name())
+                .status(settled.status().name())
                 .build();
     }
 }

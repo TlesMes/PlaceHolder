@@ -48,7 +48,22 @@ public class PointTransaction {
         this.createdAt = LocalDateTime.now();
     }
 
+    /**
+     * {@code amount}는 타입과 무관하게 <b>양수 크기</b>만 담는다 — 증감 방향은 타입이 정한다
+     * (CHARGE/SETTLE은 +, DEDUCT/REFUND는 −).
+     */
     public enum TransactionType {
-        CHARGE, DEDUCT, SETTLE
+        /** 포인트 충전 (쿠폰 상환 / PG 결제 / 취소 실패 시 복구). */
+        CHARGE,
+        /** 좌석 예약 확정에 따른 포인트 사용. */
+        DEDUCT,
+        /** 제공자 정산예정액 적립. */
+        SETTLE,
+        /**
+         * 결제 취소에 따른 포인트 회수 (ADR-019). DEDUCT를 재사용하지 않는 이유는 이력의 의미가
+         * 다르기 때문이다 — 사용자가 좌석에 쓴 것(DEDUCT)과 환불로 되돌려진 것(REFUND)이 섞이면
+         * 포인트 이력이 사실을 말하지 못한다.
+         */
+        REFUND
     }
 }
