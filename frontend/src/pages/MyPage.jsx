@@ -5,6 +5,7 @@ import { getPointHistory } from '../api/points';
 import { toMessage } from '../lib/errors';
 import { formatDateTime, formatPoint, monthsAgoLocalDateTime } from '../lib/format';
 import Layout from '../components/Layout';
+import PointBalanceCard from '../components/PointBalanceCard';
 import Spinner from '../components/Spinner';
 
 const PERIOD_PRESETS = [
@@ -202,6 +203,9 @@ function PointsTab() {
 
   return (
     <div>
+      {/* 보유 포인트 — 합산 + 재원 계층 (ADR-020) */}
+      <PointBalanceCard />
+
       {/* 필터 바: 기간 프리셋(서버) + 거래 타입(클라이언트) */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg border border-border p-1">
