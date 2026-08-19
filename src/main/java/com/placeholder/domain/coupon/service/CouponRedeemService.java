@@ -7,6 +7,7 @@ import com.placeholder.domain.coupon.entity.Coupon;
 import com.placeholder.domain.coupon.entity.CouponRedemption;
 import com.placeholder.domain.coupon.repository.CouponRedemptionRepository;
 import com.placeholder.domain.coupon.repository.CouponRepository;
+import com.placeholder.domain.point.entity.PointBucket;
 import com.placeholder.domain.point.entity.PointTransaction;
 import com.placeholder.domain.point.entity.PointTransaction.TransactionType;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
@@ -66,15 +67,17 @@ public class CouponRedeemService {
         coupon.redeem();
 
         // 4. 잔액 적립 (동일 유저 동시 작업 직렬화 위해 계정 비관적 락)
+        //    쿠폰은 우리가 뿌린 판촉 재화이므로 FREE 버킷 — 환불 재원이 되어선 안 된다 (ADR-020)
         BookerAccount bookerAccount = bookerAccountRepository.findByUserIdForUpdate(bookerId)
                 .orElseThrow(() -> new UserNotFoundException("예약자 계정을 찾을 수 없습니다"));
-        bookerAccount.charge(coupon.getAmount());
+        bookerAccount.charge(coupon.getAmount(), PointBucket.FREE);
 
         // 5. CHARGE 트랜잭션 기록 (reservation 없음)
         pointTransactionRepository.save(PointTransaction.builder()
                 .user(booker)
                 .type(TransactionType.CHARGE)
                 .amount(coupon.getAmount())
+                .bucketFree(coupon.getAmount())
                 .build());
 
         return CouponRedeemResponse.builder()
