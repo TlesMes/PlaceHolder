@@ -31,7 +31,7 @@ public class BookerAccount {
     @JoinColumn(name = "user_id", nullable = false, unique = true)
     private User user;
 
-    /** 기간제 이벤트 쿠폰분. 환불 불가. (만료 미구현 — 현재 항상 0) */
+    /** 기간제 포인트(판촉 쿠폰)분. 환불 불가. (소멸 미구현 — 현재 항상 0) */
     @Builder.Default
     @Column(name = "event_balance", nullable = false)
     private int eventBalance = 0;

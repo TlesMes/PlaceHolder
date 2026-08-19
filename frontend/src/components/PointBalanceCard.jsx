@@ -56,7 +56,7 @@ export default function PointBalanceCard() {
             ))}
           </ul>
           <p className="mt-3 text-xs text-fg-subtle">
-            위에서부터 순서대로 사용됩니다. 환불 가능 금액은 유료 캐시{' '}
+            위에서부터 순서대로 사용됩니다. 환불 가능 금액은 유료 포인트{' '}
             <span className="tabular-nums">{formatPoint(balance.refundable)}</span>입니다.
           </p>
         </div>

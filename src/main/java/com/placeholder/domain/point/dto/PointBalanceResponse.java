@@ -13,7 +13,7 @@ public class PointBalanceResponse {
     /** 사용자에게 보이는 "보유 포인트". 세 계층의 합. */
     private int total;
 
-    /** 기간제 이벤트 쿠폰분 (만료 미구현 — 현재 항상 0). */
+    /** 기간제 포인트(판촉 쿠폰)분 (소멸 미구현 — 현재 항상 0). */
     private int event;
 
     /** 무기한 쿠폰 상환분. */

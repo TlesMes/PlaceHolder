@@ -21,7 +21,7 @@ CREATE TABLE booker_accounts
 (
     id            BIGINT NOT NULL AUTO_INCREMENT,
     user_id       BIGINT NOT NULL,
-    event_balance INT    NOT NULL DEFAULT 0 COMMENT '기간제 이벤트 쿠폰분 (환불 불가, 만료 미구현)',
+    event_balance INT    NOT NULL DEFAULT 0 COMMENT '기간제 포인트(판촉 쿠폰)분 (환불 불가, 소멸 미구현)',
     free_balance  INT    NOT NULL DEFAULT 0 COMMENT '무기한 쿠폰 상환분 (환불 불가)',
     paid_balance  INT    NOT NULL DEFAULT 0 COMMENT '현금 결제 충전분 (유일한 환불 재원)',
     PRIMARY KEY (id),
