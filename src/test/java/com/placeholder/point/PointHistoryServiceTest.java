@@ -307,10 +307,14 @@ class PointHistoryServiceTest extends MySQLIntegrationTest {
     @Transactional
     PointTransaction persistTx(User user, TransactionType type, int amount,
                                Reservation reservation, LocalDateTime createdAt) {
+        // SETTLE은 제공자 원장이라 재원 계층이 없다(ADR-020 5번). 그 외 타입은 amount == 버킷합
+        // 불변식을 만족해야 하므로, 재원이 검증 대상이 아닌 이력 테스트에서는 유료분으로 채운다.
+        int paidBucket = (type == TransactionType.SETTLE) ? 0 : amount;
         PointTransaction tx = pointTransactionRepository.save(PointTransaction.builder()
                 .user(user)
                 .type(type)
                 .amount(amount)
+                .bucketPaid(paidBucket)
                 .reservation(reservation)
                 .build());
         overrideCreatedAt(tx.getId(), createdAt);

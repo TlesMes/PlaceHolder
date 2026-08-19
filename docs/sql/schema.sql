@@ -14,15 +14,22 @@ CREATE TABLE users
     UNIQUE KEY uq_users_email (email)
 );
 
+-- 잔액은 재원 계층별로 나눠 저장한다 (ADR-020).
+-- 합계 컬럼은 두지 않는다 — 버킷에서 총합은 언제나 구할 수 있지만 총합에서 버킷은 복원할 수 없어,
+-- 둘 다 저장하면 어느 한쪽만 갱신하는 코드가 생기는 순간 진실이 갈라진다.
 CREATE TABLE booker_accounts
 (
-    id      BIGINT NOT NULL AUTO_INCREMENT,
-    user_id BIGINT NOT NULL,
-    balance INT    NOT NULL DEFAULT 0,
+    id            BIGINT NOT NULL AUTO_INCREMENT,
+    user_id       BIGINT NOT NULL,
+    event_balance INT    NOT NULL DEFAULT 0 COMMENT '기간제 포인트(판촉 쿠폰)분 (환불 불가, 소멸 미구현)',
+    free_balance  INT    NOT NULL DEFAULT 0 COMMENT '무기한 쿠폰 상환분 (환불 불가)',
+    paid_balance  INT    NOT NULL DEFAULT 0 COMMENT '현금 결제 충전분 (유일한 환불 재원)',
     PRIMARY KEY (id),
     UNIQUE KEY uq_booker_accounts_user_id (user_id),
     CONSTRAINT fk_booker_accounts_user FOREIGN KEY (user_id) REFERENCES users (id),
-    CONSTRAINT chk_booker_accounts_balance CHECK (balance >= 0)
+    CONSTRAINT chk_booker_accounts_event CHECK (event_balance >= 0),
+    CONSTRAINT chk_booker_accounts_free CHECK (free_balance >= 0),
+    CONSTRAINT chk_booker_accounts_paid CHECK (paid_balance >= 0)
 );
 
 CREATE TABLE provider_accounts
@@ -85,8 +92,14 @@ CREATE TABLE point_transactions
 (
     id             BIGINT      NOT NULL AUTO_INCREMENT,
     user_id        BIGINT      NOT NULL,
-    type           VARCHAR(20) NOT NULL COMMENT 'CHARGE | DEDUCT | SETTLE',
+    type           VARCHAR(20) NOT NULL COMMENT 'CHARGE | DEDUCT | SETTLE | REFUND',
     amount         INT         NOT NULL,
+    -- 이 거래가 각 재원 계층에서 얼마씩 움직였는지 (ADR-020).
+    -- amount = bucket_event + bucket_free + bucket_paid 를 애플리케이션이 검증한다.
+    -- 단 SETTLE(제공자 원장)은 재원 계층이라는 축이 없어 세 값이 모두 0이고 검증에서 제외된다.
+    bucket_event   INT         NOT NULL DEFAULT 0,
+    bucket_free    INT         NOT NULL DEFAULT 0,
+    bucket_paid    INT         NOT NULL DEFAULT 0,
     reservation_id BIGINT NULL,
     created_at     DATETIME    NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id),

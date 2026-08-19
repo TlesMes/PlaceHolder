@@ -162,7 +162,7 @@ class PaymentCancelConcurrencyTest extends MySQLIntegrationTest {
                 .passwordHash("hash")
                 .role(User.UserRole.BOOKER)
                 .build());
-        bookerAccountRepository.save(BookerAccount.builder().user(booker).balance(0).build());
+        bookerAccountRepository.save(BookerAccount.builder().user(booker).paidBalance(0).build());
         return booker.getId();
     }
 

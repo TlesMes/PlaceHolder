@@ -145,7 +145,7 @@ class SeatReleaseConcurrencyTest extends MySQLIntegrationTest {
                 .build());
         bookerAccountRepository.save(BookerAccount.builder()
                 .user(booker)
-                .balance(balance)
+                .paidBalance(balance)
                 .build());
         return booker.getId();
     }

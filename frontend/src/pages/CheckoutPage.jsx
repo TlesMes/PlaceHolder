@@ -6,6 +6,8 @@ import { useCheckoutLeaveRelease } from '../hooks/useCheckoutLeaveRelease';
 import { useToast } from '../context/ToastContext';
 import { toMessage } from '../lib/errors';
 import { formatPrice, formatPoint } from '../lib/format';
+import { allocateSpend, SPEND_ORDER, BUCKET_LABELS } from '../lib/pointAllocation';
+import { getPointBalance } from '../api/points';
 import Layout from '../components/Layout';
 import Spinner from '../components/Spinner';
 import Countdown from '../components/Countdown';
@@ -34,6 +36,7 @@ export default function CheckoutPage() {
   const [bookerPhone, setBookerPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [balance, setBalance] = useState(null);
 
   // 직접 URL 접근/새로고침 시: 좌석·이벤트 정보를 조회해 채운다.
   // (단, heldUntil은 홀드 응답에만 있으므로 새로고침하면 카운트다운 추적은 끊긴다 → 아래 경고.)
@@ -53,6 +56,17 @@ export default function CheckoutPage() {
       alive = false;
     };
   }, [id, seatId, passed.seat, passed.event, toast]);
+
+  // 보유 포인트 — 소모 미리보기용. 실패해도 결제 자체는 진행 가능해야 하므로 조용히 넘긴다.
+  useEffect(() => {
+    let alive = true;
+    getPointBalance()
+      .then((res) => alive && setBalance(res.data))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 페이지 이탈/새로고침 경고 (결제 완료 전에만).
   useEffect(() => {
@@ -117,6 +131,9 @@ export default function CheckoutPage() {
       </Layout>
     );
   }
+
+  // 표시용 추정 — 실제 배분은 서버가 확정 트랜잭션에서 락을 쥔 채 다시 계산한다 (ADR-020)
+  const spend = allocateSpend(balance ?? {}, seat.price);
 
   return (
     <Layout>
@@ -216,6 +233,37 @@ export default function CheckoutPage() {
                 <dd className="text-base font-bold text-primary">{formatPrice(seat.price)}</dd>
               </div>
             </dl>
+
+            {/* 어느 재원이 얼마나 쓰이는지 미리 보여준다 (ADR-020).
+                사후 이력으로만 알 수 있으면 "왜 유료가 안 줄었지"가 문의로 온다. */}
+            {balance && (
+              <dl className="mt-4 space-y-2 border-t border-border pt-3 text-sm">
+                {SPEND_ORDER.map((bucket) => (
+                  <div key={bucket} className="flex justify-between">
+                    <dt className="text-fg-muted">{BUCKET_LABELS[bucket]}</dt>
+                    <dd className="tabular-nums text-fg">
+                      {spend.allocation[bucket] > 0
+                        ? `-${formatPoint(spend.allocation[bucket])}`
+                        : formatPoint(0)}
+                    </dd>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t border-border pt-2">
+                  <dt className="text-fg-muted">결제 후 잔액</dt>
+                  <dd className="font-medium tabular-nums text-fg">
+                    {formatPoint(Math.max(0, balance.total - spend.total))}
+                  </dd>
+                </div>
+                {spend.shortfall > 0 && (
+                  <p className="pt-1 text-xs text-danger">
+                    포인트가 {formatPoint(spend.shortfall)} 부족합니다. 충전 후 결제해 주세요.
+                  </p>
+                )}
+                <p className="pt-1 text-xs text-fg-subtle">
+                  위 계층 순서대로 사용됩니다. 최종 금액은 결제 시점에 확정됩니다.
+                </p>
+              </dl>
+            )}
 
             {heldUntil ? (
               <div className="mt-4 flex items-center justify-between rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg">

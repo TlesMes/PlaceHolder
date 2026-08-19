@@ -151,7 +151,7 @@ class ConfirmTokenReleaseTest extends RedisIntegrationTest {
                 .build());
         bookerAccountRepository.save(BookerAccount.builder()
                 .user(booker)
-                .balance(initialBalance)
+                .paidBalance(initialBalance)
                 .build());
 
         Seat seat = seatRepository.save(Seat.builder()

@@ -155,7 +155,7 @@ class SeatReleaseTest extends MySQLIntegrationTest {
                 .build());
         bookerAccountRepository.save(BookerAccount.builder()
                 .user(booker)
-                .balance(0)
+                .paidBalance(0)
                 .build());
         return booker.getId();
     }

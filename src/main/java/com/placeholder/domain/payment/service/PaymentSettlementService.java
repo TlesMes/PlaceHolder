@@ -4,6 +4,7 @@ import com.placeholder.domain.booker.entity.BookerAccount;
 import com.placeholder.domain.booker.repository.BookerAccountRepository;
 import com.placeholder.domain.payment.entity.PaymentOrder;
 import com.placeholder.domain.payment.repository.PaymentOrderRepository;
+import com.placeholder.domain.point.entity.PointBucket;
 import com.placeholder.domain.point.entity.PointTransaction;
 import com.placeholder.domain.point.entity.PointTransaction.TransactionType;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
@@ -110,12 +111,14 @@ public class PaymentSettlementService {
         // 동일 유저 동시 작업 직렬화를 위해 계정도 비관적 락
         BookerAccount account = bookerAccountRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new UserNotFoundException("예약자 계정을 찾을 수 없습니다"));
-        account.charge(order.getAmount());
+        // 현금으로 산 포인트이므로 PAID 버킷 — 이후 환불 재원이 될 수 있는 유일한 잔액 (ADR-020)
+        account.charge(order.getAmount(), PointBucket.PAID);
 
         pointTransactionRepository.save(PointTransaction.builder()
                 .user(order.getUser())
                 .type(TransactionType.CHARGE)
                 .amount(order.getAmount())
+                .bucketPaid(order.getAmount())
                 .build());
 
         return new SettleResult(order.getAmount(), account.getBalance(), true, order.getStatus());
@@ -131,8 +134,13 @@ public class PaymentSettlementService {
      * 도착한 두 번째 취소 요청이 잔여액을 다시 계산해 토스에 중복 취소를 날린다. 상태 전이가 곧
      * 동시 취소의 방어선이다. 외부 호출이 실패하면 {@link #revertCancel}이 이 트랜잭션을 되돌린다.
      *
-     * <p><b>환불액 = min(주문 잔여액, 현재 포인트 잔액)</b> — "미사용분만 환불" 정책. 이미 좌석 예약에
+     * <p><b>환불액 = min(주문 잔여액, 유료 잔액)</b> — "미사용분만 환불" 정책. 이미 좌석 예약에
      * 써버린 포인트는 되돌릴 수 없으므로 남은 잔액만큼만 취소한다.
+     *
+     * <p>상한이 총 잔액이 아니라 <b>유료 잔액</b>인 것이 요점이다 (ADR-020). 총 잔액으로 재면
+     * "현금 충전 → 좌석에 소진 → 쿠폰 상환 → 결제 취소" 순서에서 쿠폰으로 채워진 잔액이 보이므로
+     * <b>쿠폰이 현금으로 환전된다</b>. 주문 잔여액 상한은 이것을 막지 못한다 — 그 주문은 실제로
+     * 그 금액이었고 아직 취소된 적도 없기 때문이다.
      */
     @Transactional
     public CancelPreparation prepareCancel(String orderId, Long userId, int cancelPeriodDays) {
@@ -155,17 +163,18 @@ public class PaymentSettlementService {
         BookerAccount account = bookerAccountRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new UserNotFoundException("예약자 계정을 찾을 수 없습니다"));
 
-        int refundAmount = Math.min(order.remainingAmount(), account.getBalance());
+        int refundAmount = Math.min(order.remainingAmount(), account.refundableBalance());
         if (refundAmount <= 0) {
             throw new PaymentCancelNotAllowedException(
                     "환불 가능한 금액이 없습니다 (이미 사용했거나 전액 취소된 결제입니다)");
         }
 
-        account.deduct(refundAmount);
+        account.deductFrom(refundAmount, PointBucket.PAID);
         pointTransactionRepository.save(PointTransaction.builder()
                 .user(order.getUser())
                 .type(TransactionType.REFUND)
                 .amount(refundAmount)
+                .bucketPaid(refundAmount)
                 .build());
         order.markCanceled(refundAmount);
 
@@ -200,11 +209,13 @@ public class PaymentSettlementService {
                 .orElseThrow(() -> new UserNotFoundException("예약자 계정을 찾을 수 없습니다"));
 
         order.revertCancel(refundAmount);
-        account.charge(refundAmount);
+        // 회수했던 재원 그대로 되돌린다 — 유료에서 뺐으므로 유료로 복구해야 환불 재원이 보존된다
+        account.charge(refundAmount, PointBucket.PAID);
         pointTransactionRepository.save(PointTransaction.builder()
                 .user(order.getUser())
                 .type(TransactionType.CHARGE)
                 .amount(refundAmount)
+                .bucketPaid(refundAmount)
                 .build());
     }
 

@@ -12,3 +12,7 @@ export const getPointHistory = ({ from, to, cursor, size } = {}) => {
   if (size) params.size = size;
   return client.get('/api/points/history', { params });
 };
+
+// 보유 포인트 — 합산 + 재원 계층 분해 (BOOKER)
+// 응답: { total, event, free, paid, refundable }
+export const getPointBalance = () => client.get('/api/points/balance');

@@ -2,6 +2,7 @@ package com.placeholder.domain.reservation.service;
 
 import com.placeholder.domain.booker.entity.BookerAccount;
 import com.placeholder.domain.booker.repository.BookerAccountRepository;
+import com.placeholder.domain.point.entity.PointAllocation;
 import com.placeholder.domain.point.entity.PointTransaction;
 import com.placeholder.domain.point.entity.PointTransaction.TransactionType;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
@@ -69,7 +70,9 @@ public class ReservationService {
         int price = seat.getPrice();
 
         // 5. 도메인 메서드로 상태 변경 — 잔액 부족 시 InsufficientPointException 발생 → 전체 롤백
-        bookerAccount.deduct(price);
+        //    차감은 재원 계층 순서(EVENT→FREE→PAID)로 배분된다. 계산과 반영이 갈라지면 안 되므로
+        //    계정 락을 이미 쥔 이 자리에서 수행한다 (ADR-020 4번).
+        PointAllocation allocation = bookerAccount.deduct(price);
         providerAccount.settle(price);
         seat.confirm();
 
@@ -89,8 +92,12 @@ public class ReservationService {
                 .user(booker)
                 .type(TransactionType.DEDUCT)
                 .amount(price)
+                .bucketEvent(allocation.event())
+                .bucketFree(allocation.free())
+                .bucketPaid(allocation.paid())
                 .reservation(savedReservation)
                 .build());
+        // SETTLE은 제공자 원장이라 재원 계층이 없다 — 버킷은 0으로 두고 불변식에서도 제외된다 (ADR-020 5번)
         pointTransactionRepository.save(PointTransaction.builder()
                 .user(provider)
                 .type(TransactionType.SETTLE)

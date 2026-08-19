@@ -36,6 +36,24 @@ public class PointTransaction {
     @Column(nullable = false)
     private int amount;
 
+    /**
+     * 이 거래가 각 재원 계층에서 얼마씩 움직였는지 (ADR-020). {@code CHARGE}·{@code REFUND}는
+     * 한 칸만 차고, {@code DEDUCT}만 여러 칸에 걸칠 수 있다(이벤트 3,000 + 무료 2,000처럼).
+     *
+     * <p>잔액만으로는 "이 포인트가 어디서 왔는지"를 복원할 수 없으므로 이력이 대신 기억한다.
+     */
+    @Builder.Default
+    @Column(name = "bucket_event", nullable = false)
+    private int bucketEvent = 0;
+
+    @Builder.Default
+    @Column(name = "bucket_free", nullable = false)
+    private int bucketFree = 0;
+
+    @Builder.Default
+    @Column(name = "bucket_paid", nullable = false)
+    private int bucketPaid = 0;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reservation_id")
     private Reservation reservation;
@@ -46,6 +64,29 @@ public class PointTransaction {
     @PrePersist
     private void prePersist() {
         this.createdAt = LocalDateTime.now();
+        validateBuckets();
+    }
+
+    /**
+     * 불변식: {@code amount == bucketEvent + bucketFree + bucketPaid}.
+     *
+     * <p><b>단, {@code SETTLE}은 제외한다.</b> 이 테이블은 예약자 원장과 제공자 원장을 겸직하는데,
+     * {@code SETTLE}은 제공자 앞으로 기록되고 잔액도 {@code ProviderAccount.settlementBalance}에
+     * 쌓인다. 제공자에게는 재원 계층이라는 축이 없다 — 예약자가 쿠폰으로 냈든 현금으로 냈든
+     * 제공자가 받을 금액은 같기 때문이다. 불변식을 전체에 걸면 {@code amount>0, 버킷합=0}인
+     * SETTLE 행이 저장을 거부당하고, DEDUCT와 같은 트랜잭션이라 <b>좌석 확정이 통째로 롤백된다</b>
+     * (ADR-020 5번).
+     */
+    private void validateBuckets() {
+        if (type == TransactionType.SETTLE) {
+            return;
+        }
+        int bucketSum = bucketEvent + bucketFree + bucketPaid;
+        if (bucketSum != amount) {
+            throw new IllegalStateException(
+                    "포인트 거래의 재원 배분 합이 금액과 다릅니다: type=" + type
+                            + ", amount=" + amount + ", 버킷합=" + bucketSum);
+        }
     }
 
     /**

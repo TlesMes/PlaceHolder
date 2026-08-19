@@ -150,6 +150,9 @@ class PaymentCancelServiceTest extends MySQLIntegrationTest {
         // 이력은 지우지 않고 반대 거래로 남긴다 — 잔액이 실제로 두 번 움직였으므로
         assertThat(countOf(bookerId, TransactionType.REFUND)).isEqualTo(1);
         assertThat(countOf(bookerId, TransactionType.CHARGE)).isEqualTo(2);
+        // 복구는 회수했던 재원(유료)으로 되돌아가야 한다 — 무료로 들어가면 환불 재원이 조용히 증발한다
+        assertThat(bookerAccountRepository.findByUserId(bookerId).orElseThrow().refundableBalance())
+                .isEqualTo(10_000);
     }
 
     @Test
@@ -217,7 +220,11 @@ class PaymentCancelServiceTest extends MySQLIntegrationTest {
 
         // 1차: 잔액 4천 취소
         cancelService.cancel(orderId, bookerId, "1차");
-        // 사용자가 다시 4천을 충전해 잔액이 생긴 상황 (쿠폰 등) — 주문 잔여액 6천이 상한
+        // 사용자가 현금으로 4천을 다시 충전해 잔액이 생긴 상황 — 주문 잔여액 6천이 상한
+        //
+        // 재원이 '현금'이어야 한다는 점이 중요하다. 쿠폰으로 채운 잔액이면 이 취소는 거부되어야 하며
+        // (ADR-020), 그 경로는 PointBucketRefundExploitTest가 따로 검증한다. 이 테스트의 목적은
+        // "부분 취소가 잔여액 범위에서 누적되는가"이므로 재원은 환불 가능한 쪽으로 둔다.
         chargeBalance(bookerId, 4_000);
         PaymentCancelResponse second = cancelService.cancel(orderId, bookerId, "2차");
 
@@ -289,7 +296,7 @@ class PaymentCancelServiceTest extends MySQLIntegrationTest {
                 .passwordHash("hash")
                 .role(User.UserRole.BOOKER)
                 .build());
-        bookerAccountRepository.save(BookerAccount.builder().user(booker).balance(0).build());
+        bookerAccountRepository.save(BookerAccount.builder().user(booker).paidBalance(0).build());
         return booker.getId();
     }
 
@@ -309,7 +316,7 @@ class PaymentCancelServiceTest extends MySQLIntegrationTest {
 
     private void chargeBalance(Long userId, int amount) {
         BookerAccount account = bookerAccountRepository.findByUserId(userId).orElseThrow();
-        account.charge(amount);
+        account.charge(amount, com.placeholder.domain.point.entity.PointBucket.PAID);
         bookerAccountRepository.save(account);
     }
 
