@@ -209,7 +209,38 @@ public class PaymentOrder {
         this.cancelConfirmedAt = LocalDateTime.now();
     }
 
+    /**
+     * 사용자에게 보여줄 <b>환불 진행 상태</b> — 두 시각에서 파생한다(별도 컬럼 없음).
+     *
+     * <p>이 구분이 없으면 화면이 거짓말을 한다. 취소 ①이 커밋되는 순간 {@code REFUND} 거래가
+     * 찍히고 잔액도 줄어들지만, ②(토스 호출)가 아직이면 <b>현금은 돌아가지 않았다.</b>
+     * 그런데 포인트 이력만 보는 사용자에겐 "환불됨"으로 보인다.
+     *
+     * <p>{@link RefundStatus#PENDING}과 {@link RefundStatus#COMPLETED}는 성격이 다르다 —
+     * 전자는 "요청이 아직 상대에게 가지 않았다", 후자는 "우리 할 일은 끝났고 카드사 반영 대기".
+     *
+     * <p>⚠️ 판정 조건은 {@code PaymentOrderRepository.findUnconfirmedCancels}의 JPQL과
+     * <b>같은 뜻이어야 한다.</b> 한쪽만 바뀌면 "화면엔 처리 중인데 배치는 안 줍는" 주문이 생긴다.
+     */
+    public RefundStatus refundStatus() {
+        if (canceledAt == null) {
+            return RefundStatus.NONE;
+        }
+        boolean confirmed = cancelConfirmedAt != null && cancelConfirmedAt.isAfter(canceledAt);
+        return confirmed ? RefundStatus.COMPLETED : RefundStatus.PENDING;
+    }
+
     public enum PaymentStatus {
         READY, DONE, FAILED, EXPIRED, PARTIAL_CANCELED, CANCELED
+    }
+
+    /** 환불 진행 상태 (파생값 — 저장하지 않는다). */
+    public enum RefundStatus {
+        /** 취소 이력 없음. */
+        NONE,
+        /** 우리 장부는 취소인데 토스 확인 전 — 현금은 아직 돌아가지 않았다. */
+        PENDING,
+        /** 토스 취소까지 확인됨 (카드사 반영은 영업일 소요). */
+        COMPLETED
     }
 }

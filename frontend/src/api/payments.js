@@ -11,3 +11,10 @@ export const createPaymentOrder = (amount) =>
 // 서버가 멱등 처리하므로 같은 orderId로 두 번 호출해도 적립은 1회다.
 export const confirmPayment = ({ orderId, paymentKey, amount }) =>
   client.post('/api/payments/confirm', { orderId, paymentKey, amount });
+
+// 내 결제·환불 내역 (BOOKER)
+// 응답: { payments: [{ orderId, amount, status, canceledAmount, createdAt, approvedAt,
+//                      canceledAt, refundStatus }] }
+// refundStatus는 저장값이 아니라 서버가 두 시각(canceledAt/cancelConfirmedAt)에서 파생한다.
+// PENDING = 포인트는 회수됐지만 현금 환불 요청이 아직 토스에 도달하지 않은 상태 (ADR-019).
+export const getMyPayments = () => client.get('/api/payments/my');

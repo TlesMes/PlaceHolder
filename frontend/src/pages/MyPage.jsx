@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getMyReservations } from '../api/reservations';
 import { getPointHistory } from '../api/points';
+import { getMyPayments } from '../api/payments';
 import { toMessage } from '../lib/errors';
 import { formatDateTime, formatPoint, monthsAgoLocalDateTime } from '../lib/format';
 import Layout from '../components/Layout';
@@ -31,9 +32,36 @@ const TYPE_META = {
   REFUND: { label: '환불', sign: '-', text: 'text-danger', badge: 'bg-danger-soft text-danger-soft-fg' },
 };
 
+// 주문 상태 표현
+const PAYMENT_STATUS_META = {
+  READY: { label: '결제 대기', badge: 'bg-surface-muted text-fg-muted' },
+  DONE: { label: '결제 완료', badge: 'bg-success-soft text-success-soft-fg' },
+  FAILED: { label: '결제 실패', badge: 'bg-danger-soft text-danger-soft-fg' },
+  EXPIRED: { label: '만료됨', badge: 'bg-surface-muted text-fg-muted' },
+  PARTIAL_CANCELED: { label: '부분 취소', badge: 'bg-warning-soft text-warning-soft-fg' },
+  CANCELED: { label: '전액 취소', badge: 'bg-warning-soft text-warning-soft-fg' },
+};
+
+// 환불 진행 상태 — PENDING과 COMPLETED를 구분하는 것이 이 화면의 존재 이유다.
+// 취소 요청이 접수되면 포인트는 즉시 회수되지만, 현금 환불 요청이 PG에 도달하기 전이면
+// 아직 돈은 돌아가지 않았다. 그 구분 없이 "환불 완료"만 보여주면 화면이 거짓말을 한다 (ADR-019).
+const REFUND_STATUS_META = {
+  PENDING: {
+    label: '환불 처리 중',
+    badge: 'bg-warning-soft text-warning-soft-fg',
+    note: '환불 요청을 처리하고 있습니다. 포인트는 이미 차감되었으며, 결제하신 수단으로의 환불은 아직 완료되지 않았습니다.',
+  },
+  COMPLETED: {
+    label: '환불 완료',
+    badge: 'bg-success-soft text-success-soft-fg',
+    note: '환불이 완료되었습니다. 카드사 정책에 따라 실제 반영까지 영업일 기준 3~5일이 걸릴 수 있습니다.',
+  },
+};
+
 const TABS = [
   { key: 'reservations', label: '예약 내역' },
   { key: 'points', label: '포인트 이력' },
+  { key: 'payments', label: '결제·환불' },
 ];
 
 export default function MyPage() {
@@ -43,7 +71,9 @@ export default function MyPage() {
     <Layout>
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight text-fg">마이페이지</h1>
-        <p className="mt-1 text-sm text-fg-muted">예약 내역과 포인트 이력을 확인하세요.</p>
+        <p className="mt-1 text-sm text-fg-muted">
+          예약 내역, 포인트 이력, 결제·환불 상태를 확인하세요.
+        </p>
       </div>
 
       {/* 탭 바 */}
@@ -63,7 +93,9 @@ export default function MyPage() {
         ))}
       </div>
 
-      {tab === 'reservations' ? <ReservationsTab /> : <PointsTab />}
+      {tab === 'reservations' && <ReservationsTab />}
+      {tab === 'points' && <PointsTab />}
+      {tab === 'payments' && <PaymentsTab />}
     </Layout>
   );
 }
@@ -136,6 +168,92 @@ function ReservationsTab() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PaymentsTab() {
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    getMyPayments()
+      .then((res) => alive && setPayments(res.data.payments))
+      .catch((err) => alive && setError(toMessage(err, '결제 내역을 불러오지 못했습니다.')))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (loading) return <Spinner className="py-20" />;
+  if (error)
+    return (
+      <p className="rounded-xl bg-danger-soft px-5 py-4 text-sm text-danger-soft-fg">{error}</p>
+    );
+
+  if (payments.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-border py-20 text-center text-fg-subtle">
+        결제 내역이 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {payments.map((p) => {
+        const status = PAYMENT_STATUS_META[p.status] ?? {
+          label: p.status,
+          badge: 'bg-surface-muted text-fg-muted',
+        };
+        const refund = REFUND_STATUS_META[p.refundStatus];
+
+        return (
+          <div
+            key={p.orderId}
+            className="rounded-xl border border-border bg-surface p-5 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-base font-semibold text-fg">
+                  포인트 충전 {formatPoint(p.amount)}
+                </p>
+                <p className="mt-1 text-sm text-fg-muted">{formatDateTime(p.createdAt)}</p>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${status.badge}`}
+                >
+                  {status.label}
+                </span>
+                {refund && (
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${refund.badge}`}
+                  >
+                    {refund.label}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {p.canceledAmount > 0 && (
+              <div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-sm">
+                <span className="text-fg-subtle">취소 금액</span>
+                <span className="font-semibold text-fg">{formatPoint(p.canceledAmount)}</span>
+              </div>
+            )}
+
+            {refund && (
+              <p className="mt-3 text-xs leading-relaxed text-fg-subtle">{refund.note}</p>
+            )}
+
+            <p className="mt-3 font-mono text-xs text-fg-subtle">주문번호 {p.orderId}</p>
+          </div>
+        );
+      })}
     </div>
   );
 }
