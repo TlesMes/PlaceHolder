@@ -282,7 +282,7 @@ cd frontend && npm install && npm run dev
 | [018](docs/adr/ADR-018-payment-pg-integration.md) | PG 연동 — 동기 승인 + 웹훅 이중화, 멱등 수렴 |
 | [019](docs/adr/ADR-019-payment-cancel-refund.md) | 취소·환불 — 되돌릴 수 없는 쪽을 나중에 치기 |
 | [020](docs/adr/ADR-020-point-bucket-separation.md) | 포인트 재원 분리 — 무료/유료를 섞으면 쿠폰이 현금이 된다 |
-| [021](docs/adr/ADR-021-settlement-derive-from-ledger.md) | 정산 잔액을 원장에서 파생 — 없앨 것은 락이 아니라 쓰기였다 |
+| [021](docs/adr/ADR-021-settlement-derive-from-ledger.md) | 정산 잔액을 컬럼에 저장하지 않고 거래 내역 합계로 계산 |
 
 ---
 

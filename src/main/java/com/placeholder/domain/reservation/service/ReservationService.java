@@ -48,7 +48,7 @@ public class ReservationService {
     @Transactional
     public ReservationConfirmResponse confirmReservation(Long seatId, Long bookerId) {
         // 락 순서 규약: 좌석 → 예약자 계정. 전 경로가 같은 순서를 지켜야 순환 대기가 없다.
-        // 제공자 계정은 잠그지 않는다 — 정산 잔액을 원장에서 파생시키므로 갱신할 행이 없다(ADR-021).
+        // 제공자 계정은 잠그지 않는다 — 정산 잔액을 저장하지 않고 SETTLE 합계로 계산하므로 갱신할 행이 없다(ADR-021).
 
         // 1. 좌석 비관적 락 조회 — 동시 확정 요청 직렬화
         Seat seat = seatRepository.findByIdForUpdate(seatId)
