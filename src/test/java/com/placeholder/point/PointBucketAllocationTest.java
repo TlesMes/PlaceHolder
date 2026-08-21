@@ -133,14 +133,16 @@ class PointBucketAllocationTest {
         }
 
         @Test
-        @DisplayName("단일 계층 차감은 그 계층 잔액을 넘을 수 없다 (총합이 충분해도)")
-        void deductFromRespectsBucketCeiling() {
+        @DisplayName("환불 차감은 유료 잔액을 넘을 수 없다 — 쿠폰분이 아무리 많아도")
+        void deductRefundableRespectsPaidCeiling() {
+            // 총합은 21,000이지만 환불 재원은 1,000뿐이다
             BookerAccount account = account(10_000, 10_000, 1_000);
 
-            assertThatThrownBy(() -> account.deductFrom(2_000, PointBucket.PAID))
+            assertThatThrownBy(() -> account.deductRefundable(2_000))
                     .isInstanceOf(InsufficientPointException.class);
 
             assertThat(account.getPaidBalance()).isEqualTo(1_000);
+            assertThat(account.getFreeBalance()).as("무료분은 환불에 동원되지 않는다").isEqualTo(10_000);
         }
     }
 

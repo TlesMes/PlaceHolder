@@ -169,7 +169,7 @@ public class PaymentSettlementService {
                     "환불 가능한 금액이 없습니다 (이미 사용했거나 전액 취소된 결제입니다)");
         }
 
-        account.deductFrom(refundAmount, PointBucket.PAID);
+        account.deductRefundable(refundAmount);
         pointTransactionRepository.save(PointTransaction.builder()
                 .user(order.getUser())
                 .type(TransactionType.REFUND)
