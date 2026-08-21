@@ -12,7 +12,11 @@ import java.time.LocalDateTime;
     name = "point_transactions",
     indexes = {
         @Index(name = "idx_pt_user_id", columnList = "user_id"),
-        @Index(name = "idx_pt_reservation_id", columnList = "reservation_id")
+        @Index(name = "idx_pt_reservation_id", columnList = "reservation_id"),
+        // 제공자 정산 잔액 SUM 커버링 (ADR-021). amount가 인덱스 안에 있어 본체를 읽지 않는다.
+        // created_at은 오늘 쓰이지 않는다 — 스냅샷(created_at > ?)과 정산 조회 페이징이 같은
+        // 인덱스를 그대로 쓰게 하려는 의도적 배치다. = 조건(user_id, type)이 범위 조건 앞에 온다.
+        @Index(name = "idx_pt_settlement_sum", columnList = "user_id, type, created_at, amount")
     }
 )
 @Getter
@@ -71,8 +75,8 @@ public class PointTransaction {
      * 불변식: {@code amount == bucketEvent + bucketFree + bucketPaid}.
      *
      * <p><b>단, {@code SETTLE}은 제외한다.</b> 이 테이블은 예약자 원장과 제공자 원장을 겸직하는데,
-     * {@code SETTLE}은 제공자 앞으로 기록되고 잔액도 {@code ProviderAccount.settlementBalance}에
-     * 쌓인다. 제공자에게는 재원 계층이라는 축이 없다 — 예약자가 쿠폰으로 냈든 현금으로 냈든
+     * {@code SETTLE}은 제공자 앞으로 기록되며, 제공자 정산 잔액은 이 행들의 합으로 파생된다
+     * (ADR-021 — 잔액 컬럼은 없다). 제공자에게는 재원 계층이라는 축이 없다 — 예약자가 쿠폰으로 냈든 현금으로 냈든
      * 제공자가 받을 금액은 같기 때문이다. 불변식을 전체에 걸면 {@code amount>0, 버킷합=0}인
      * SETTLE 행이 저장을 거부당하고, DEDUCT와 같은 트랜잭션이라 <b>좌석 확정이 통째로 롤백된다</b>
      * (ADR-020 5번).

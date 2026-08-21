@@ -48,6 +48,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p><b>인기 이벤트의 정상 경로가 정확히 이 모양이다</b> — 한 제공자의 좌석 여러 개를 여러 사람이
  * 동시에 산다. 예외적 상황이 아니라 기대 트래픽이다.
+ *
+ * <p><b>이후 경과.</b> 위 결함은 PR #28에서 비관적 락으로 막았고, 그 락이 남긴 직렬화 상한
+ * (제공자당 초당 약 85건)을 PR #31이 측정해 병목으로 판정했다. 그래서 잔액 컬럼 자체를 없애고
+ * {@code SETTLE} 원장의 합으로 파생시켰다(ADR-021) — <b>갱신할 잔액이 없으므로 lost update가
+ * 구조적으로 불가능해졌다.</b> 이 테스트는 그 사실의 회귀 안전망으로 남는다.
  */
 @SuppressWarnings("null")
 @SpringBootTest
@@ -109,18 +114,19 @@ class ProviderSettlementConcurrencyTest extends MySQLIntegrationTest {
                 .as("서로 다른 좌석이므로 모두 확정되어야 한다")
                 .isEqualTo(SEAT_COUNT);
 
-        // 이력은 append-only라 유실되지 않는다 — 이 대비가 증상을 드러낸다:
-        // SETTLE 행은 10건인데 잔액만 모자란다면 원장과 잔액이 어긋난 것이다
+        // 이력은 append-only라 동시 삽입에도 유실되지 않는다
         int settleRows = pointTransactionRepository
                 .findByTypeAndUserId(TransactionType.SETTLE, f.providerId).size();
         assertThat(settleRows)
                 .as("SETTLE 이력은 좌석 수만큼 남아야 한다")
                 .isEqualTo(SEAT_COUNT);
 
-        ProviderAccount account = providerAccountRepository.findByUserId(f.providerId).orElseThrow();
-        assertThat(account.getSettlementBalance())
-                .as("정산 잔액이 SETTLE 이력 합과 일치해야 한다 (lost update 부재)")
-                .isEqualTo(SEAT_COUNT * PRICE);
+        // 잔액은 이제 이 이력의 합이다(ADR-021). 예전엔 이 단정이 lost update 탐지기였다 —
+        // 이력 10행 / 잔액 5,000처럼 갈라지는 것을 잡았다. 지금은 갈라질 두 곳이 없어
+        // 사실상 "이력이 온전한가"를 다시 묻는다. 단정이 싱거워진 것 자체가 결론이다.
+        assertThat(pointTransactionRepository.sumSettlementByProviderId(f.providerId))
+                .as("정산 잔액(파생) 이 SETTLE 이력 합과 일치해야 한다")
+                .isEqualTo((long) SEAT_COUNT * PRICE);
     }
 
     // --- 픽스처 ---

@@ -71,9 +71,10 @@ class ReservationConfirmServiceTest extends MySQLIntegrationTest {
         BookerAccount bookerAccount = bookerAccountRepository.findByUserId(f.bookerId).orElseThrow();
         assertThat(bookerAccount.getBalance()).isEqualTo(initialBalance - price);
 
-        // then — ProviderAccount 정산액 적립
-        ProviderAccount providerAccount = providerAccountRepository.findByUserId(f.providerId).orElseThrow();
-        assertThat(providerAccount.getSettlementBalance()).isEqualTo(price);
+        // then — 제공자 정산액. 확정은 계정을 건드리지 않고 SETTLE 원장만 남기므로,
+        //         잔액은 그 합으로 파생된다 (ADR-021)
+        assertThat(pointTransactionRepository.sumSettlementByProviderId(f.providerId))
+                .isEqualTo(price);
 
         // then — PointTransaction 2행 (DEDUCT + SETTLE)
         List<PointTransaction> txList =

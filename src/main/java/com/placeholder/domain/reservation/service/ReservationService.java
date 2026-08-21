@@ -6,8 +6,6 @@ import com.placeholder.domain.point.entity.PointAllocation;
 import com.placeholder.domain.point.entity.PointTransaction;
 import com.placeholder.domain.point.entity.PointTransaction.TransactionType;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
-import com.placeholder.domain.provider.entity.ProviderAccount;
-import com.placeholder.domain.provider.repository.ProviderAccountRepository;
 import com.placeholder.domain.queue.repository.QueueRedisRepository;
 import com.placeholder.domain.reservation.dto.MyReservationsResponse;
 import com.placeholder.domain.reservation.dto.ReservationConfirmResponse;
@@ -42,7 +40,6 @@ public class ReservationService {
 
     private final SeatRepository seatRepository;
     private final BookerAccountRepository bookerAccountRepository;
-    private final ProviderAccountRepository providerAccountRepository;
     private final ReservationRepository reservationRepository;
     private final PointTransactionRepository pointTransactionRepository;
     private final UserRepository userRepository;
@@ -50,6 +47,9 @@ public class ReservationService {
 
     @Transactional
     public ReservationConfirmResponse confirmReservation(Long seatId, Long bookerId) {
+        // 락 순서 규약: 좌석 → 예약자 계정. 전 경로가 같은 순서를 지켜야 순환 대기가 없다.
+        // 제공자 계정은 잠그지 않는다 — 정산 잔액을 저장하지 않고 SETTLE 합계로 계산하므로 갱신할 행이 없다(ADR-021).
+
         // 1. 좌석 비관적 락 조회 — 동시 확정 요청 직렬화
         Seat seat = seatRepository.findByIdForUpdate(seatId)
                 .orElseThrow(() -> new SeatNotFoundException("좌석을 찾을 수 없습니다"));
@@ -91,7 +91,9 @@ public class ReservationService {
                 .bucketPaid(allocation.paid())
                 .reservation(savedReservation)
                 .build());
-        // SETTLE은 제공자 원장이라 재원 계층이 없다 — 버킷은 0으로 두고 불변식에서도 제외된다 (ADR-020 5번)
+        // SETTLE은 제공자 원장이라 재원 계층이 없다 — 버킷은 0으로 두고 불변식에서도 제외된다 (ADR-020 5번).
+        // 이 행이 제공자 정산의 유일한 진실이다. 잔액은 조회 시 이 행들의 합으로 파생된다(ADR-021) —
+        // 확정이 제공자 계정을 건드리지 않으므로 같은 제공자의 판매가 서로를 기다리지 않는다.
         pointTransactionRepository.save(PointTransaction.builder()
                 .user(provider)
                 .type(TransactionType.SETTLE)
@@ -99,20 +101,7 @@ public class ReservationService {
                 .reservation(savedReservation)
                 .build());
 
-        // 7. 제공자 정산 적립 — 비관적 락. 이 트랜잭션에서 가장 마지막에 잡는다.
-        //
-        //    락은 획득 시점부터 커밋까지 유지되므로 "언제 잡느냐"가 곧 보유 시간이다. 좌석·예약자·
-        //    예약·이력을 모두 처리한 뒤 잡아야 보유 구간이 (획득 → 커밋)으로 최소화된다.
-        //    같은 제공자의 좌석을 여러 예약자가 동시에 살 때 이 행이 직렬화 지점이 되기 때문이다.
-        //
-        //    락 순서 규약: 좌석 → 예약자 계정 → 제공자 계정. 전 경로가 같은 순서를 지켜야
-        //    순환 대기가 생기지 않는다(현재 제공자 계정을 잠그는 경로는 확정뿐).
-        Long providerId = provider.getId();
-        ProviderAccount providerAccount = providerAccountRepository.findByUserIdForUpdate(providerId)
-                .orElseThrow(() -> new UserNotFoundException("제공자 계정을 찾을 수 없습니다"));
-        providerAccount.settle(price);
-
-        // 8. 커밋 성공 시에만 대기열 입장 토큰 회수 — 구매 완료 유저가 잔여 TTL 동안 ceiling 슬롯을
+        // 7. 커밋 성공 시에만 대기열 입장 토큰 회수 — 구매 완료 유저가 잔여 TTL 동안 ceiling 슬롯을
         //    점유(유령 세션)하지 않도록 즉시 반환. 트랜잭션 안에서 바로 지우면 이후 커밋 실패 시
         //    "결제는 안 됐는데 토큰만 잃는" 역전이 생기므로 afterCommit으로 미룬다(롤백 시 미실행 = 토큰 보존).
         Long eventId = seat.getEvent().getId();

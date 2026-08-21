@@ -3,7 +3,6 @@ package com.placeholder.domain.provider.service;
 import com.placeholder.domain.point.entity.PointTransaction;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
 import com.placeholder.domain.provider.dto.SettlementResponse;
-import com.placeholder.domain.provider.entity.ProviderAccount;
 import com.placeholder.domain.provider.repository.ProviderAccountRepository;
 import com.placeholder.domain.reservation.entity.Reservation;
 import com.placeholder.domain.seat.entity.Seat;
@@ -23,7 +22,8 @@ public class ProviderAccountService {
     private final PointTransactionRepository pointTransactionRepository;
 
     public SettlementResponse getMySettlement(Long providerId) {
-        ProviderAccount account = providerAccountRepository.findByUserId(providerId)
+        // 계정 조회는 존재 검증용이다 — 잔액은 여기서 나오지 않는다 (ADR-021)
+        providerAccountRepository.findByUserId(providerId)
                 .orElseThrow(() -> new UserNotFoundException("제공자 계정을 찾을 수 없습니다"));
 
         List<PointTransaction> settlements =
@@ -45,7 +45,7 @@ public class ProviderAccountService {
                 .toList();
 
         return SettlementResponse.builder()
-                .settlementBalance(account.getSettlementBalance())
+                .settlementBalance((int) pointTransactionRepository.sumSettlementByProviderId(providerId))
                 .settlements(items)
                 .build();
     }

@@ -34,13 +34,12 @@ CREATE TABLE booker_accounts
 
 CREATE TABLE provider_accounts
 (
-    id                 BIGINT NOT NULL AUTO_INCREMENT,
-    user_id            BIGINT NOT NULL,
-    settlement_balance INT    NOT NULL DEFAULT 0,
+    -- 정산 잔액 컬럼은 없다. 잔액은 point_transactions의 SETTLE 합으로 파생된다 (ADR-021).
+    id      BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_provider_accounts_user_id (user_id),
-    CONSTRAINT fk_provider_accounts_user FOREIGN KEY (user_id) REFERENCES users (id),
-    CONSTRAINT chk_provider_accounts_settlement CHECK (settlement_balance >= 0)
+    CONSTRAINT fk_provider_accounts_user FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
 CREATE TABLE events
@@ -107,5 +106,7 @@ CREATE TABLE point_transactions
     CONSTRAINT fk_pt_reservation FOREIGN KEY (reservation_id) REFERENCES reservations (id),
     CONSTRAINT chk_pt_amount CHECK (amount > 0),
     INDEX          idx_pt_user_id (user_id),
-    INDEX          idx_pt_reservation_id (reservation_id)
+    INDEX          idx_pt_reservation_id (reservation_id),
+    -- 제공자 정산 잔액 SUM 커버링 (ADR-021). created_at은 스냅샷·페이징 대비 자리 (= 조건이 범위 앞)
+    INDEX          idx_pt_settlement_sum (user_id, type, created_at, amount)
 );
