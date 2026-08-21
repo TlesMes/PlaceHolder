@@ -36,4 +36,37 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, Long
      */
     List<PaymentOrder> findByStatusAndCreatedAtBetweenOrderByCreatedAtAsc(
             PaymentStatus status, LocalDateTime from, LocalDateTime to, Pageable pageable);
+
+    /**
+     * 내 결제·환불 내역 — 최신순. 사용자당 주문 건수가 적어 cursor 페이징 없이 상한만 둔다
+     * (ADR-012의 "사용자당 거래 소량" 전제와 같은 판단).
+     */
+    List<PaymentOrder> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
+    /**
+     * <b>역방향 대사 후보</b> — 우리는 취소로 기록했는데 토스 확인이 안 된 주문 (ADR-019).
+     *
+     * <p>취소 보상 트랜잭션의 ①(포인트 회수 커밋)과 ②(토스 호출) 사이에서 서버가 죽으면
+     * "포인트만 회수되고 돈은 안 돌아간" 상태가 남는다. 그 주문들이 여기 잡힌다.
+     *
+     * <p><b>{@code cancelConfirmedAt IS NULL}로는 부족하다.</b> {@code markCanceled}가
+     * {@code canceledAt}을, {@code confirmCancel}이 {@code cancelConfirmedAt}을 매번 덮어쓰므로,
+     * 부분 취소 <b>2회차</b>가 크래시하면 {@code cancelConfirmedAt}은 1회차 값으로 non-null이다.
+     * 정확히 막으려던 상태가 후보에서 빠지는 것이다 — 그래서 두 시각을 <b>비교</b>한다.
+     *
+     * <p><b>{@code <} 가 아니라 {@code <=} 인 이유:</b> 오탐(이미 확인된 취소를 다시 대조)은 멱등 키
+     * 덕분에 무해하고 차액 0으로 즉시 배출되지만, 누락은 <b>영구적 금전 손실</b>이다. 위험이
+     * 비대칭이므로 안전한 쪽으로 기운다.
+     *
+     * <p>락은 걸지 않는다 — 외부 토스 호출 동안 락을 쥐면 ADR-018 트랜잭션 경계 원칙을 깬다.
+     * 실제 상태 전이는 건별로 {@link #findByOrderIdForUpdate}가 다시 잠근다.
+     */
+    @Query("select p from PaymentOrder p "
+            + "where p.canceledAt is not null "
+            + "and p.canceledAt between :from and :to "
+            + "and (p.cancelConfirmedAt is null or p.cancelConfirmedAt <= p.canceledAt) "
+            + "order by p.canceledAt asc")
+    List<PaymentOrder> findUnconfirmedCancels(@Param("from") LocalDateTime from,
+                                              @Param("to") LocalDateTime to,
+                                              Pageable pageable);
 }

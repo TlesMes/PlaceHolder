@@ -39,3 +39,6 @@ payment:
     # 스케줄러 빈 자체를 만들지 않아 자동 발화가 테스트에 끼어들 여지를 없앤다
     # (fixedDelay는 주기를 크게 잡아도 컨텍스트 기동 직후 1회 발화하므로 주기 조정으로는 부족하다).
     enabled: false
+  cancel-reconciliation:
+    # 위와 같은 이유. 역방향 대사도 reconcile()을 직접 호출해 검증한다.
+    enabled: false

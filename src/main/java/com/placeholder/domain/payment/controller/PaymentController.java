@@ -1,5 +1,6 @@
 package com.placeholder.domain.payment.controller;
 
+import com.placeholder.domain.payment.dto.MyPaymentsResponse;
 import com.placeholder.domain.payment.dto.PaymentCancelRequest;
 import com.placeholder.domain.payment.dto.PaymentCancelResponse;
 import com.placeholder.domain.payment.dto.PaymentConfirmRequest;
@@ -8,6 +9,7 @@ import com.placeholder.domain.payment.dto.PaymentOrderCreateRequest;
 import com.placeholder.domain.payment.dto.PaymentOrderCreateResponse;
 import com.placeholder.domain.payment.service.PaymentCancelService;
 import com.placeholder.domain.payment.service.PaymentConfirmService;
+import com.placeholder.domain.payment.service.PaymentHistoryService;
 import com.placeholder.domain.payment.service.PaymentOrderService;
 import com.placeholder.global.security.CustomUserDetails;
 import jakarta.validation.Valid;
@@ -15,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,6 +35,21 @@ public class PaymentController {
     private final PaymentOrderService paymentOrderService;
     private final PaymentConfirmService paymentConfirmService;
     private final PaymentCancelService paymentCancelService;
+    private final PaymentHistoryService paymentHistoryService;
+
+    /**
+     * 내 결제·환불 내역 — 각 주문의 {@code refundStatus}로 환불 진행 상태를 알린다 (ADR-019).
+     *
+     * <p>취소 API의 동기 응답만으로는 "포인트는 회수됐는데 현금은 아직"인 상태를 사용자에게 알릴 수
+     * 없다 — 그 상태는 응답이 도달하지 못했기 때문에 생긴 것이다. 나중에 다시 봤을 때 보이는 창구.
+     */
+    @PreAuthorize("hasRole('BOOKER')")
+    @GetMapping("/my")
+    public ResponseEntity<MyPaymentsResponse> getMyPayments(
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+
+        return ResponseEntity.ok(paymentHistoryService.getMyPayments(userDetails.getUserId()));
+    }
 
     /**
      * 주문 생성 — orderId 발급 + 결제 금액 서버 확정 저장. 응답의 clientKey로 프론트가 결제창을 연다.

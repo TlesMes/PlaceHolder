@@ -137,10 +137,18 @@ public class TossPaymentClientImpl implements TossPaymentClient {
         if (res == null) {
             throw new PaymentConfirmFailedException("토스 응답 본문이 비어 있습니다");
         }
-        return new TossPaymentResult(res.paymentKey(), res.orderId(), res.status(), res.totalAmount());
+        return new TossPaymentResult(res.paymentKey(), res.orderId(), res.status(),
+                res.totalAmount(), res.balanceAmount());
     }
 
-    /** 토스 응답 중 우리가 쓰는 필드만 매핑 (그 외 필드는 무시). */
-    private record TossPaymentResponse(String paymentKey, String orderId, String status, int totalAmount) {
+    /**
+     * 토스 응답 중 우리가 쓰는 필드만 매핑 (그 외 필드는 무시).
+     *
+     * <p>{@code balanceAmount}(취소가능 잔액)는 역방향 대사가 "토스는 얼마나 취소했나"를 아는
+     * 유일한 경로다. 우리는 이번 시도의 취소액을 저장하지 않고 누적액만 갖고 있어서,
+     * 재시도할 금액을 로컬 상태만으로는 복원할 수 없다 (ADR-019).
+     */
+    private record TossPaymentResponse(String paymentKey, String orderId, String status,
+                                       int totalAmount, int balanceAmount) {
     }
 }

@@ -54,7 +54,8 @@ public class PaymentCancelService {
         // ② 외부 토스 취소 — 어떤 트랜잭션에도 들어가지 않는다
         try {
             TossPaymentResult result = tossClient.cancel(prepared.paymentKey(), reason,
-                    prepared.refundAmount(), idempotencyKey(orderId, prepared.totalCanceledAmount()));
+                    prepared.refundAmount(),
+                    CancelIdempotencyKey.of(orderId, prepared.totalCanceledAmount()));
 
             // 200을 받았다는 사실만으로 돈이 돌아갔다고 볼 수 없다. 상태를 직접 확인하지 않으면
             // 취소되지 않은 결제를 취소로 장부에 남기게 된다 — 아래 catch가 보상해준다.
@@ -89,14 +90,4 @@ public class PaymentCancelService {
                 .build();
     }
 
-    /**
-     * 토스 멱등 키 — <b>이번 취소액이 아니라 누적 취소액으로</b> 만든다.
-     *
-     * <p>이번 취소액을 쓰면 같은 금액의 부분 취소를 두 번 할 때(1만원 주문을 5천원씩) 키가 겹쳐,
-     * 토스가 두 번째 요청에 첫 결과를 재생한다 — 우리 장부엔 1만원 취소로 남지만 실제로 돌아간 돈은
-     * 5천원인 조용한 손실이 된다. 누적액은 취소가 진행될수록 단조 증가하므로 단계마다 유일하다.
-     */
-    private String idempotencyKey(String orderId, int totalCanceledAmount) {
-        return "cancel-" + orderId + "-" + totalCanceledAmount;
-    }
 }
