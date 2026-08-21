@@ -90,27 +90,21 @@ public class BookerAccount {
     }
 
     /**
-     * 지정한 계층에서만 차감한다. 환불 전용 — 환불액은 유료 잔액을 넘을 수 없으므로 호출 측이
-     * {@link #refundableBalance()}로 상한을 건 뒤 사용한다.
+     * 환불을 위해 <b>유료분에서만</b> 차감한다. {@link #refundableBalance()}와 짝을 이룬다 —
+     * 상한을 묻고 그만큼 뺀다.
+     *
+     * <p>계층을 인자로 받지 않는 것이 의도다. "환불은 유료 재원에서만"이라는 규칙(ADR-020)을
+     * 호출 측 판단이 아니라 <b>타입으로 강제</b>하기 위함이다. 계층을 고를 수 있게 두면
+     * 언젠가 쿠폰분을 환불하는 호출이 생길 수 있고, 그것이 곧 이 ADR이 막은 구멍이다.
      */
-    public void deductFrom(int amount, PointBucket bucket) {
+    public void deductRefundable(int amount) {
         if (amount <= 0) {
             throw new IllegalArgumentException("차감 금액은 양수여야 합니다");
         }
-        switch (bucket) {
-            case EVENT -> {
-                requireEnough(eventBalance, amount);
-                this.eventBalance -= amount;
-            }
-            case FREE -> {
-                requireEnough(freeBalance, amount);
-                this.freeBalance -= amount;
-            }
-            case PAID -> {
-                requireEnough(paidBalance, amount);
-                this.paidBalance -= amount;
-            }
+        if (paidBalance < amount) {
+            throw new InsufficientPointException("포인트 잔액이 부족합니다");
         }
+        this.paidBalance -= amount;
     }
 
     /**
@@ -127,12 +121,6 @@ public class BookerAccount {
             case EVENT -> this.eventBalance += amount;
             case FREE -> this.freeBalance += amount;
             case PAID -> this.paidBalance += amount;
-        }
-    }
-
-    private void requireEnough(int bucketBalance, int amount) {
-        if (bucketBalance < amount) {
-            throw new InsufficientPointException("포인트 잔액이 부족합니다");
         }
     }
 }
