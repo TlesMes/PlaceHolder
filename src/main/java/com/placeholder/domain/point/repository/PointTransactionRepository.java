@@ -42,6 +42,22 @@ public interface PointTransactionRepository extends JpaRepository<PointTransacti
             Pageable pageable);
 
     /**
+     * 제공자 정산 잔액 — SETTLE 원장의 합 (ADR-021).
+     *
+     * <p>확정 경로가 잔액 컬럼을 갱신하지 않으므로 이 합이 잔액이다. 이미 로드하는 목록
+     * ({@link #findSettlementsByProviderId})을 메모리에서 더하지 않는 이유는, 그러면 잔액이
+     * "전건 조회"에 묶여 정산 조회 페이징이 들어오는 순간 페이지 합으로 쪼개져 깨지기 때문이다.
+     *
+     * <p>{@code idx_pt_settlement_sum (user_id, type, created_at, amount)}가 커버링이라 본체
+     * 테이블을 읽지 않는다. 인덱스가 없으면 user_id로 좁힌 뒤 <b>행마다</b> amount를 읽으러
+     * 본체를 찾아가야 한다 — 판매량에 비례해 랜덤 접근이 늘어난다.
+     */
+    @Query("select coalesce(sum(pt.amount), 0) from PointTransaction pt " +
+           "where pt.user.id = :providerId " +
+           "and pt.type = com.placeholder.domain.point.entity.PointTransaction.TransactionType.SETTLE")
+    long sumSettlementByProviderId(@Param("providerId") Long providerId);
+
+    /**
      * 제공자 정산 거래 목록 — SETTLE 타입만, reservation/seat/event fetch join.
      * 사용자당 정산 건수가 작은 도메인이라 페이징 미적용.
      */

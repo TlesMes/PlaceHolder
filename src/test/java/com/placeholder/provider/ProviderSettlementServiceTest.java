@@ -63,7 +63,7 @@ class ProviderSettlementServiceTest extends MySQLIntegrationTest {
     @DisplayName("정상: 잔액 + SETTLE 2건 매핑, createdAt DESC 정렬")
     void getMySettlement_success_andOrdering() {
         // given
-        User provider = persistProviderWithAccount(30_000);
+        User provider = persistProviderWithAccount();
         Event event = persistEvent(provider, "정산 이벤트", "정산홀");
         User booker = persistBooker();
 
@@ -79,7 +79,7 @@ class ProviderSettlementServiceTest extends MySQLIntegrationTest {
         // when
         SettlementResponse response = providerAccountService.getMySettlement(provider.getId());
 
-        // then - 잔액
+        // then - 잔액은 SETTLE 두 건의 합으로 파생된다 (10,000 + 20,000)
         assertThat(response.getSettlementBalance()).isEqualTo(30_000);
 
         // then - SETTLE 2건, DESC(최신 txB 먼저)
@@ -102,7 +102,7 @@ class ProviderSettlementServiceTest extends MySQLIntegrationTest {
     @DisplayName("SETTLE 타입만: CHARGE/DEDUCT 거래는 정산 목록에서 제외")
     void getMySettlement_onlySettleType() {
         // given - provider 계정에 SETTLE 1건 + (노이즈) CHARGE/DEDUCT
-        User provider = persistProviderWithAccount(10_000);
+        User provider = persistProviderWithAccount();
         Event event = persistEvent(provider, "노이즈 이벤트", "노이즈홀");
         User booker = persistBooker();
         Seat seat = persistSeat(event, "N-1", 10_000);
@@ -123,10 +123,10 @@ class ProviderSettlementServiceTest extends MySQLIntegrationTest {
     }
 
     @Test
-    @DisplayName("정산 거래 없음: 잔액 반환 + 빈 목록")
+    @DisplayName("정산 거래 없음: 잔액 0 + 빈 목록 (SUM이 null이 아니라 0)")
     void getMySettlement_empty() {
         // given - 계정만 있고 SETTLE 없음
-        User provider = persistProviderWithAccount(0);
+        User provider = persistProviderWithAccount();
 
         // when
         SettlementResponse response = providerAccountService.getMySettlement(provider.getId());
@@ -148,8 +148,8 @@ class ProviderSettlementServiceTest extends MySQLIntegrationTest {
     @DisplayName("provider_id 격리: 타 provider의 SETTLE 제외")
     void getMySettlement_isolation() {
         // given - 두 provider 각각 SETTLE
-        User me = persistProviderWithAccount(10_000);
-        User other = persistProviderWithAccount(20_000);
+        User me = persistProviderWithAccount();
+        User other = persistProviderWithAccount();
         User booker = persistBooker();
 
         Event myEvent = persistEvent(me, "내 이벤트", "내홀");
@@ -167,12 +167,49 @@ class ProviderSettlementServiceTest extends MySQLIntegrationTest {
         // then - 내 SETTLE 1건만
         assertThat(response.getSettlements()).hasSize(1);
         assertThat(response.getSettlements().get(0).getEventTitle()).isEqualTo("내 이벤트");
+
+        // 잔액이 파생값이 되면서 격리가 목록만의 문제가 아니게 됐다 —
+        // SUM이 user_id를 놓치면 남의 판매액이 내 잔액에 더해진다 (ADR-021)
+        assertThat(response.getSettlementBalance())
+                .as("타 provider의 SETTLE이 합에 섞이면 안 된다")
+                .isEqualTo(10_000);
+    }
+
+    @Test
+    @DisplayName("잔액 파생: SETTLE 외 타입(DEDUCT)은 합에 들어가지 않는다")
+    void getMySettlement_balanceExcludesNonSettleTypes() {
+        // given - 같은 user_id 앞으로 SETTLE 1건 + DEDUCT 1건.
+        // 도메인상 제공자에게 DEDUCT가 찍히진 않지만, SUM이 타입을 거르는지는 별도 사실이다.
+        User provider = persistProviderWithAccount();
+        User booker = persistBooker();
+        Event event = persistEvent(provider, "타입 필터 이벤트", "필터홀");
+        Reservation reservation =
+                persistReservation(booker, persistSeat(event, "T-1", 10_000), 10_000);
+
+        persistSettle(provider, 10_000, reservation, LocalDateTime.now().minusDays(1));
+        pointTransactionRepository.save(PointTransaction.builder()
+                .user(provider)
+                .type(PointTransaction.TransactionType.DEDUCT)
+                .amount(7_000)
+                .bucketPaid(7_000)
+                .build());
+
+        // when
+        SettlementResponse response = providerAccountService.getMySettlement(provider.getId());
+
+        // then - DEDUCT 7,000은 제외되고 SETTLE 10,000만
+        assertThat(response.getSettlementBalance()).isEqualTo(10_000);
+        assertThat(response.getSettlements()).hasSize(1);
     }
 
     // --- 셋업 헬퍼 ---
 
+    /**
+     * 잔액을 인자로 받지 않는다 — 잔액은 심는 값이 아니라 {@code SETTLE} 행의 합으로
+     * 파생되기 때문이다(ADR-021). 기대 잔액은 각 테스트가 {@code persistSettle}로 만든다.
+     */
     @Transactional
-    User persistProviderWithAccount(int settlementBalance) {
+    User persistProviderWithAccount() {
         User provider = userRepository.save(User.builder()
                 .email("provider-" + uniqueId() + "@test.com")
                 .passwordHash("hash")
@@ -180,7 +217,6 @@ class ProviderSettlementServiceTest extends MySQLIntegrationTest {
                 .build());
         providerAccountRepository.save(ProviderAccount.builder()
                 .user(provider)
-                .settlementBalance(settlementBalance)
                 .build());
         return provider;
     }
