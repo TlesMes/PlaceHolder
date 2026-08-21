@@ -4,6 +4,7 @@ import com.placeholder.domain.event.entity.Event;
 import com.placeholder.domain.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.DynamicUpdate;
 
 import java.time.LocalDateTime;
 
@@ -13,6 +14,21 @@ import java.time.LocalDateTime;
     uniqueConstraints = @UniqueConstraint(name = "uk_seats_event_label", columnNames = {"event_id", "label"}),
     indexes = @Index(name = "idx_seats_status_held_until", columnList = "status, held_until")
 )
+/**
+ * <b>{@code @DynamicUpdate}인 이유:</b> Hibernate 기본값은 엔티티마다 UPDATE 문을 하나 만들어
+ * 재사용하는 것이고, 그 문장에는 안 바뀐 칸도 전부 들어간다. 좌석 확정은 {@code status}·
+ * {@code heldBy}·{@code heldUntil} 세 칸만 바꾸는데 {@code event_id}·{@code label}까지 쓰고 있었다.
+ *
+ * <p>그 두 칸이 {@code uk_seats_event_label}을 이루고 이 인덱스는 {@code event_id} 순으로 정렬돼
+ * 있다. 한 이벤트의 좌석들은 인덱스에서 같은 자리에 모여 있으므로, 인기 이벤트처럼 좌석이 한
+ * 이벤트에 몰리면 동시 확정들이 매번 같은 자리를 거치며 짧게 순서를 기다린다.
+ *
+ * <p>정합성 문제가 아니라 헛일이다. 문장에서 두 칸을 빼면 그 인덱스를 볼 이유가 사라진다.
+ * 실측: 좌석 240석이 한 이벤트에 몰린 조건에서 확정 처리량 266 → 323건/초(+21%),
+ * 이벤트가 8개로 흩어진 조건에서는 변화 없음(392 → 408). 자세한 근거는
+ * {@code docs/performance/provider-settlement-throughput.md} 9절.
+ */
+@DynamicUpdate
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
