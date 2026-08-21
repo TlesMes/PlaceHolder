@@ -62,21 +62,15 @@ public class ReservationService {
         BookerAccount bookerAccount = bookerAccountRepository.findByUserIdForUpdate(bookerId)
                 .orElseThrow(() -> new UserNotFoundException("예약자 계정을 찾을 수 없습니다"));
 
-        // 4. 제공자 계정 조회
-        Long providerId = seat.getEvent().getProvider().getId();
-        ProviderAccount providerAccount = providerAccountRepository.findByUserId(providerId)
-                .orElseThrow(() -> new UserNotFoundException("제공자 계정을 찾을 수 없습니다"));
-
         int price = seat.getPrice();
 
-        // 5. 도메인 메서드로 상태 변경 — 잔액 부족 시 InsufficientPointException 발생 → 전체 롤백
+        // 4. 도메인 메서드로 상태 변경 — 잔액 부족 시 InsufficientPointException 발생 → 전체 롤백
         //    차감은 재원 계층 순서(EVENT→FREE→PAID)로 배분된다. 계산과 반영이 갈라지면 안 되므로
         //    계정 락을 이미 쥔 이 자리에서 수행한다 (ADR-020 4번).
         PointAllocation allocation = bookerAccount.deduct(price);
-        providerAccount.settle(price);
         seat.confirm();
 
-        // 6. Reservation 저장
+        // 5. Reservation 저장
         User booker = userRepository.findByIdAndDeletedAtIsNull(bookerId)
                 .orElseThrow(() -> new UserNotFoundException("예약자를 찾을 수 없습니다"));
         Reservation reservation = Reservation.builder()
@@ -86,7 +80,7 @@ public class ReservationService {
                 .build();
         Reservation savedReservation = reservationRepository.save(reservation);
 
-        // 7. PointTransaction 2행 저장 (DEDUCT: 예약자, SETTLE: 제공자)
+        // 6. PointTransaction 2행 저장 (DEDUCT: 예약자, SETTLE: 제공자)
         User provider = seat.getEvent().getProvider();
         pointTransactionRepository.save(PointTransaction.builder()
                 .user(booker)
@@ -104,6 +98,19 @@ public class ReservationService {
                 .amount(price)
                 .reservation(savedReservation)
                 .build());
+
+        // 7. 제공자 정산 적립 — 비관적 락. 이 트랜잭션에서 가장 마지막에 잡는다.
+        //
+        //    락은 획득 시점부터 커밋까지 유지되므로 "언제 잡느냐"가 곧 보유 시간이다. 좌석·예약자·
+        //    예약·이력을 모두 처리한 뒤 잡아야 보유 구간이 (획득 → 커밋)으로 최소화된다.
+        //    같은 제공자의 좌석을 여러 예약자가 동시에 살 때 이 행이 직렬화 지점이 되기 때문이다.
+        //
+        //    락 순서 규약: 좌석 → 예약자 계정 → 제공자 계정. 전 경로가 같은 순서를 지켜야
+        //    순환 대기가 생기지 않는다(현재 제공자 계정을 잠그는 경로는 확정뿐).
+        Long providerId = provider.getId();
+        ProviderAccount providerAccount = providerAccountRepository.findByUserIdForUpdate(providerId)
+                .orElseThrow(() -> new UserNotFoundException("제공자 계정을 찾을 수 없습니다"));
+        providerAccount.settle(price);
 
         // 8. 커밋 성공 시에만 대기열 입장 토큰 회수 — 구매 완료 유저가 잔여 TTL 동안 ceiling 슬롯을
         //    점유(유령 세션)하지 않도록 즉시 반환. 트랜잭션 안에서 바로 지우면 이후 커밋 실패 시
