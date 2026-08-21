@@ -220,6 +220,72 @@ public class PaymentSettlementService {
     }
 
     /**
+     * <b>역방향 대사 — 취소 확인 스탬프</b>. 대사가 토스와 대조를 마쳤을 때만 호출한다 (ADR-019).
+     *
+     * <p><b>{@code expectedCanceledAmount} 가드가 이 메서드의 존재 이유다.</b> 대사는 후보를 락 없이
+     * 읽고 → 트랜잭션 밖에서 토스를 호출하고 → 여기서 기록한다. 그 사이에 사용자가 <b>새 부분 취소</b>를
+     * 하면 {@code canceledAmount}가 늘어나는데, 그대로 스탬프를 찍으면 아직 토스에 도달하지도 않은
+     * 새 취소까지 "확인됨"으로 표시된다 — 대사가 스스로 크래시 창을 만들어 덮어버리는 셈이다.
+     *
+     * <p>값이 달라졌으면 아무것도 하지 않는다. 다음 주기가 갱신된 상태로 다시 대조한다.
+     *
+     * @return 실제로 스탬프를 찍었으면 true, 그 사이 장부가 바뀌어 건너뛰었으면 false
+     */
+    @Transactional
+    public boolean confirmCancelIfUnchanged(String orderId, int expectedCanceledAmount) {
+        PaymentOrder order = paymentOrderRepository.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new PaymentOrderNotFoundException("주문을 찾을 수 없습니다"));
+
+        if (order.getCanceledAmount() != expectedCanceledAmount) {
+            return false;
+        }
+        order.confirmCancel();
+        return true;
+    }
+
+    /**
+     * <b>역방향 대사 — 포기(revert)</b>. 재시도를 오래 했는데도 토스 취소가 끝내 실패할 때,
+     * 회수했던 포인트를 되돌려 사용자 상태를 확정시킨다 (ADR-019).
+     *
+     * <p><b>호출 측이 {@code delta > 0}(= 토스가 확실히 취소하지 않은 금액)을 확인한 뒤에만 부른다.</b>
+     * 실제로 환불이 나간 건에 포인트까지 복구하면 사용자가 <b>돈과 포인트를 둘 다</b> 갖는다.
+     *
+     * <p>되돌린 뒤 잔여 취소액이 남아 있으면 확인 스탬프를 찍어 후보에서 배출한다 — 남은 취소분은
+     * 토스가 확인해 준 부분이기 때문이다. 0이 되면 {@link PaymentOrder#revertCancel}이
+     * {@code canceledAt}을 null로 만들어 후보 조건에서 자연히 빠진다.
+     *
+     * @return 실제로 되돌렸으면 true, 그 사이 장부가 바뀌어 건너뛰었으면 false
+     */
+    @Transactional
+    public boolean revertCancelIfUnchanged(String orderId, int refundAmount, int expectedCanceledAmount) {
+        PaymentOrder order = paymentOrderRepository.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new PaymentOrderNotFoundException("주문을 찾을 수 없습니다"));
+
+        if (order.getCanceledAmount() != expectedCanceledAmount) {
+            return false;
+        }
+
+        Long userId = order.getUser().getId();
+        BookerAccount account = bookerAccountRepository.findByUserIdForUpdate(userId)
+                .orElseThrow(() -> new UserNotFoundException("예약자 계정을 찾을 수 없습니다"));
+
+        order.revertCancel(refundAmount);
+        // 회수했던 재원 그대로 되돌린다 — 유료에서 뺐으므로 유료로 복구해야 환불 재원이 보존된다 (ADR-020)
+        account.charge(refundAmount, PointBucket.PAID);
+        pointTransactionRepository.save(PointTransaction.builder()
+                .user(order.getUser())
+                .type(TransactionType.CHARGE)
+                .amount(refundAmount)
+                .bucketPaid(refundAmount)
+                .build());
+
+        if (order.getCanceledAmount() > 0) {
+            order.confirmCancel();
+        }
+        return true;
+    }
+
+    /**
      * @param newlyCredited 이번 호출에서 실제로 적립했으면 true, 멱등 no-op이면 false
      * @param status        주문의 <b>실제</b> 현재 상태. 멱등 재요청 응답에 DONE을 박아 넣으면
      *                      이미 취소된 주문에도 "DONE"이라고 답하게 된다(ADR-019)
