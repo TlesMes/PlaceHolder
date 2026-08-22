@@ -23,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -58,6 +59,12 @@ class PaymentCancelServiceTest extends MySQLIntegrationTest {
     @Autowired PaymentOrderRepository paymentOrderRepository;
     @Autowired BookerAccountRepository bookerAccountRepository;
     @Autowired PointTransactionRepository pointTransactionRepository;
+
+    /**
+     * 운영 설정과 같은 값을 읽는다 — 기한을 테스트에 상수로 박으면 설정만 바뀌었을 때
+     * 테스트가 조용히 무의미해진다(거부를 기대하는 테스트는 빗나가도 통과한다).
+     */
+    @Value("${payment.cancel.period-days}") int cancelPeriodDays;
     @Autowired UserRepository userRepository;
     @Autowired JdbcTemplate jdbcTemplate;
 
@@ -156,11 +163,11 @@ class PaymentCancelServiceTest extends MySQLIntegrationTest {
     }
 
     @Test
-    @DisplayName("취소 기한: 승인 7일 초과 주문 → 거부, 토스 호출 없음")
+    @DisplayName("취소 기한: 기한 초과 주문 → 거부, 토스 호출 없음")
     void cancel_afterPeriod_rejected() {
         Long bookerId = persistBooker();
         String orderId = chargedOrder(bookerId, 10_000);
-        backdateApprovedAt(orderId, 8);
+        backdateApprovedAt(orderId, cancelPeriodDays + 1);
 
         assertThatThrownBy(() -> cancelService.cancel(orderId, bookerId, "고객 요청"))
                 .isInstanceOf(PaymentCancelNotAllowedException.class)
@@ -236,19 +243,19 @@ class PaymentCancelServiceTest extends MySQLIntegrationTest {
     }
 
     @Test
-    @DisplayName("취소 기한 경계: 마감 1시간 전은 가능, 1시간 후는 거부 (기준은 승인 + 7×24시간)")
+    @DisplayName("취소 기한 경계: 마감 1시간 전은 가능, 1시간 후는 거부 (기준은 승인 + 기한×24시간)")
     void cancel_periodBoundary() {
         // 마감 직전 — 아직 취소할 수 있어야 한다
         Long inTime = persistBooker();
         String orderA = chargedOrder(inTime, 10_000);
-        backdateApprovedAtHours(orderA, 7 * 24 - 1);
+        backdateApprovedAtHours(orderA, cancelPeriodDays * 24 - 1);
         assertThat(cancelService.cancel(orderA, inTime, "마감 1시간 전").getStatus()).isEqualTo("CANCELED");
 
-        // 마감 직후 — 거부되어야 한다. 기한은 달력 날짜가 아니라 승인 시각 + 168시간으로 센다
-        // (정확히 168시간 되는 그 순간의 동작은 knife-edge라 단정하지 않는다)
+        // 마감 직후 — 거부되어야 한다. 기한은 달력 날짜가 아니라 승인 시각 + (기한×24)시간으로 센다
+        // (정확히 그 시각이 되는 순간의 동작은 knife-edge라 단정하지 않는다)
         Long tooLate = persistBooker();
         String orderB = chargedOrder(tooLate, 10_000);
-        backdateApprovedAtHours(orderB, 7 * 24 + 1);
+        backdateApprovedAtHours(orderB, cancelPeriodDays * 24 + 1);
         assertThatThrownBy(() -> cancelService.cancel(orderB, tooLate, "마감 1시간 후"))
                 .isInstanceOf(PaymentCancelNotAllowedException.class)
                 .hasMessageContaining("기간");

@@ -64,7 +64,7 @@ toss:
 payment:
   # 취소·환불 (ADR-019)
   cancel:
-    period-days: 7             # 전자상거래법 청약철회 기간. 승인 시각 기준
+    period-days: 365           # 카드 취소 실질 상한(카드사 보관 기간). 승인 시각 기준
   # 대사 — 동기 승인과 웹훅이 둘 다 실패한 결제를 주기적으로 찾아 보정한다 (ADR-018 삼중화)
   reconciliation:
     enabled: true

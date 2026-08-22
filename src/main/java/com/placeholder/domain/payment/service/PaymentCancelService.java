@@ -43,8 +43,17 @@ public class PaymentCancelService {
     private final PaymentOrderRepository paymentOrderRepository;
     private final TossPaymentClient tossClient;
 
-    /** 취소 가능 기간(일). 전자상거래법 청약철회 기간 7일 (ADR-019). */
-    @Value("${payment.cancel.period-days:7}")
+    /**
+     * 취소 가능 기간(일). 카드 결제의 실질 취소 상한 1년 (ADR-019).
+     *
+     * <p>청약철회 기간(7일)을 쓰면 <b>기한이 지난 미사용 현금이 영영 인출 불가</b>가 된다 —
+     * 출금(PAYOUT) 경로가 없어 이 API가 유일한 환불 통로이기 때문. 청약철회("거래를 물릴 권리")와
+     * 미사용 잔액 환급("안 쓴 돈을 돌려받을 권리")은 별개인데 전자의 기한으로 후자까지 막던 문제.
+     *
+     * <p>상한을 1년으로 두는 것은 결제망 제약이다 — 카드사 데이터 보관 기간이 지나면 토스 취소
+     * 자체가 실패한다. 우리가 더 길게 약속해도 지킬 수단이 없다.
+     */
+    @Value("${payment.cancel.period-days:365}")
     private int cancelPeriodDays;
 
     public PaymentCancelResponse cancel(String orderId, Long userId, String reason) {
