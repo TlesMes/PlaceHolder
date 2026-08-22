@@ -436,6 +436,7 @@ com.placeholder
 ### 백로그 — 기타
 - ~~**프론트 401 응답 인터셉터 없음**~~ → **PR #34 머지 완료 2026-08-22.** 응답 인터셉터 추가(25줄). 상세는 아래 완료 항목.
 - **정산 조회 cursor 페이징(측정 선행):** `/providers/my/settlement` 전건 반환 → 건수 증가 응답 곡선 측정 후 도입 판단. `docs/performance/settlement-query-scalability.md`
+- **정산 잔액 스냅샷 도입 보류(2026-08-22 재확인):** PR #32가 잔액을 컬럼 대신 `SETTLE` 이력 SUM으로 파생시키며 스냅샷을 유보했던 판단을 재확인. 스냅샷은 `created_at`(INSERT 시각, 커밋 시각 아님) 경계에서 결제 보정 잡과 같은 `now-안전여유` 설계가 새로 필요해 정합성 위험을 들여오는데, 아직 SUM이 느려진다는 측정 근거가 없다(측정 없는 최적화 = 이 프로젝트가 지금까지 피해온 패턴). 트리거: `PAYOUT`(실제 출금) 기능 도입으로 자연히 유계가 되거나, 행 수 대비 응답시간 곡선이 실측으로 나오면 그때 판단. 도입 비용은 지금이나 나중이나 동일(쿼리 1 + 메서드 ~5줄).
 
 ### 중요 메모
 - **⚠️ Maven 실행:** 시스템에 `mvn`이 **설치되어 있지 않음**(PATH에 없음, IntelliJ 번들 Maven만 존재). 터미널/스크립트에서 빌드·실행 시 반드시 **`mvnw.cmd`(Windows) / `./mvnw`(bash)** 사용. 예: `.\mvnw.cmd spring-boot:run`, `.\mvnw.cmd test`. `mvn ...`을 직접 호출하면 `command not found`로 실패하고, 백그라운드 실행 시엔 PID만 찍히고 즉시 종료됨(로그 안 남음). Wrapper는 Maven 3.9.16 + Java 17(Temurin) 자동 인식.
