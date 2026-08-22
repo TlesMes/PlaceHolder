@@ -74,8 +74,22 @@ class SettlementThroughputBenchmark extends MySQLIntegrationTest {
 
     private static final int TOTAL_CONFIRMS = 240;   // 1·2·4·8로 나누어떨어진다
     private static final int THREADS = 32;
-    private static final int[] PROVIDER_COUNTS = {1, 2, 4, 8};
-    private static final int REPEATS = 3;
+    /**
+     * 측정 조합. 예전에는 제공자 수 하나만 바꿨는데, 픽스처가 제공자 1명당 이벤트 1개를 만들어서
+     * <b>제공자 수와 이벤트 수가 붙어 움직였다</b> — 몰려서 느린 것이 제공자 때문인지 이벤트
+     * 때문인지 구분할 수 없었다.
+     *
+     * <p>이벤트는 제공자가 한 명이므로 한 이벤트의 좌석은 반드시 한 제공자 것이다. 따라서
+     * "제공자 8명 · 이벤트 1개"는 만들 수 없고, 아래 세 칸이 가능한 전부다.
+     * {@code (1,1)}과 {@code (1,8)}이 같으면 원인은 제공자 쪽, {@code (1,8)}이 {@code (8,8)}만큼
+     * 빨라지면 원인은 이벤트 쪽이다.
+     */
+    private static final Cell[] CELLS = {
+            new Cell(1, 1),   // 제공자도 이벤트도 몰림 (기존 P=1)
+            new Cell(1, 8),   // 제공자만 몰고 이벤트는 흩음
+            new Cell(8, 8),   // 둘 다 흩음 (기존 P=8)
+    };
+    private static final int REPEATS = 5;
     private static final int PRICE = 5_000;
 
     @Autowired ReservationService reservationService;
@@ -92,16 +106,16 @@ class SettlementThroughputBenchmark extends MySQLIntegrationTest {
     // ------------------------------------------------------------------ 측정
 
     @Test
-    @DisplayName("제공자 수 대조 — 처리량이 제공자 수에 어떤 모양으로 반응하는가")
-    void providerCountSweep() throws InterruptedException {
+    @DisplayName("제공자 수 × 이벤트 수 대조 — 몰려서 느린 것이 어느 쪽 때문인가")
+    void providerAndEventSweep() throws InterruptedException {
         List<Row> rows = new ArrayList<>();
 
         // 워밍업 1회 폐기 — JIT·커넥션 풀 채우기·Hibernate 초회 비용이 첫 회차에 몰린다
-        runOnce(1);
+        runOnce(CELLS[0]);
 
-        for (int providers : PROVIDER_COUNTS) {
+        for (Cell cell : CELLS) {
             for (int rep = 0; rep < REPEATS; rep++) {
-                rows.add(runOnce(providers));
+                rows.add(runOnce(cell));
             }
         }
 
@@ -110,8 +124,8 @@ class SettlementThroughputBenchmark extends MySQLIntegrationTest {
 
     // ------------------------------------------------------------------ 실행
 
-    private Row runOnce(int providerCount) throws InterruptedException {
-        Fixture f = persistFixture(providerCount);
+    private Row runOnce(Cell cell) throws InterruptedException {
+        Fixture f = persistFixture(cell);
         confirmNanos.clear();
 
         ExecutorService executor = Executors.newFixedThreadPool(THREADS);
@@ -165,44 +179,51 @@ class SettlementThroughputBenchmark extends MySQLIntegrationTest {
         }
 
         double seconds = wallNanos / 1_000_000_000.0;
-        return new Row(providerCount, TOTAL_CONFIRMS / seconds,
+        return new Row(cell, TOTAL_CONFIRMS / seconds,
                 percentile(confirmNanos, 50), percentile(confirmNanos, 95), percentile(confirmNanos, 99));
     }
 
     // ------------------------------------------------------------------ 리포트
 
-    private record Row(int providers, double throughput,
+    /** 제공자 수 × 이벤트 수 한 칸. 이벤트 수는 제공자 수의 배수여야 균등 분배가 된다. */
+    private record Cell(int providers, int events) {
+        String label() {
+            return "P=" + providers + " E=" + events;
+        }
+    }
+
+    private record Row(Cell cell, double throughput,
                        double confirmP50, double confirmP95, double confirmP99) {
     }
 
     private void report(String arm, List<Row> rows) {
-        int[] groups = rows.stream().mapToInt(Row::providers).distinct().sorted().toArray();
-
         StringBuilder sb = new StringBuilder();
-        sb.append("\n=== 제공자 정산 처리량 측정 — ").append(arm).append(" ===\n");
-        sb.append("조건: 총 확정 ").append(TOTAL_CONFIRMS).append("건 / 스레드 ").append(THREADS)
-                .append(" / Hikari 48 / 반복 ").append(REPEATS).append("회 중앙값 / 워밍업 1회 폐기\n");
-        sb.append(String.format("%-4s %10s %10s %10s %10s%n",
-                "P", "확정/초", "지연p50", "지연p95", "지연p99"));
+        sb.append(String.format("%n=== 제공자 정산 처리량 측정 — %s ===%n", arm));
+        sb.append(String.format("조건: 총 확정 %d건 / 스레드 %d / Hikari 48 / 칸당 %d회 중앙값 / 워밍업 1회 폐기%n",
+                TOTAL_CONFIRMS, THREADS, REPEATS));
+        sb.append(String.format("%-10s %10s %10s %10s %10s%n",
+                "칸", "확정/초", "지연p50", "지연p95", "지연p99"));
 
-        for (int providers : groups) {
-            List<Row> group = rows.stream().filter(r -> r.providers() == providers).toList();
-            sb.append(String.format("%-4d %10.1f %10s %10s %10s%n",
-                    providers, median(group, Row::throughput),
+        for (Cell cell : CELLS) {
+            List<Row> group = rows.stream().filter(r -> r.cell().equals(cell)).toList();
+            if (group.isEmpty()) continue;
+            sb.append(String.format("%-10s %10.1f %10s %10s %10s%n",
+                    cell.label(), median(group, Row::throughput),
                     ms(group, Row::confirmP50), ms(group, Row::confirmP95), ms(group, Row::confirmP99)));
         }
 
-        // 형태: P=1 대비 배수. 이 비율이 결론이고 위의 절대값은 참고치일 뿐이다.
-        double baseline = median(rows.stream().filter(r -> r.providers() == groups[0]).toList(), Row::throughput);
-        sb.append("\n형태(P=").append(groups[0]).append(" 대비 처리량 배수): ");
-        for (int providers : groups) {
-            List<Row> group = rows.stream().filter(r -> r.providers() == providers).toList();
-            sb.append(String.format("P=%d → %.2fx   ", providers, median(group, Row::throughput) / baseline));
+        double baseline = median(rows.stream().filter(r -> r.cell().equals(CELLS[0])).toList(),
+                Row::throughput);
+        sb.append(System.lineSeparator()).append(CELLS[0].label()).append(" 대비 배수: ");
+        for (Cell cell : CELLS) {
+            List<Row> group = rows.stream().filter(r -> r.cell().equals(cell)).toList();
+            if (group.isEmpty()) continue;
+            sb.append(String.format("%s → %.2fx   ", cell.label(), median(group, Row::throughput) / baseline));
         }
 
-        // 판정: 파생 후에는 공유하는 행이 없으므로 배수가 1.0 근처로 평평해져야 한다.
-        // 재설계 전 실측은 P=8에서 3.99x였다 (docs/performance/provider-settlement-throughput.md 8절)
-        sb.append(String.format("%n(재설계 전 같은 측정: P=1 88.1건/초, P=8 351.9건/초, 배수 3.99x)%n"));
+        // 읽는 법: (1,1)과 (1,8)이 같으면 몰려서 느린 원인은 제공자 쪽,
+        //          (1,8)이 (8,8)만큼 빨라지면 원인은 이벤트 쪽이다.
+        sb.append(String.format("%n(파생 전: P=1 88.1건/초, P=8 351.9건/초 — 그때는 제공자·이벤트가 붙어 있었다)%n"));
 
         System.out.println(sb);
     }
@@ -230,31 +251,40 @@ class SettlementThroughputBenchmark extends MySQLIntegrationTest {
     }
 
     /**
-     * 제공자 {@code providerCount}명에게 좌석을 균등 분배하고, 좌석마다 서로 다른 예약자가
-     * HELD 상태로 잡고 있게 만든다. 예약자를 좌석마다 따로 두는 이유는 예약자 계정 락으로
-     * 요청들이 직렬화되면 대조 변수가 오염되기 때문이다.
+     * 제공자 {@code cell.providers()}명, 이벤트 {@code cell.events()}개를 만들고 좌석을 이벤트에
+     * 균등 분배한다. 이벤트는 제공자에게 라운드로빈으로 배정되므로 두 수를 <b>따로</b> 움직일 수
+     * 있다 — 이전 픽스처는 제공자 1명당 이벤트 1개로 고정돼 둘을 구분할 수 없었다.
+     *
+     * <p>좌석마다 예약자를 따로 두는 이유는 예약자 계정 락으로 요청들이 직렬화되면 대조 변수가
+     * 오염되기 때문이다.
      *
      * <p>단일 트랜잭션으로 묶는다 — 건별 저장은 커밋이 수백 회 일어나 픽스처 구축이 측정보다
      * 오래 걸린다.
      */
-    private Fixture persistFixture(int providerCount) {
+    private Fixture persistFixture(Cell cell) {
         return transactionTemplate.execute(status -> {
             List<Long> providerIds = new ArrayList<>();
-            List<Event> events = new ArrayList<>();
-            for (int i = 0; i < providerCount; i++) {
+            List<User> providers = new ArrayList<>();
+            for (int i = 0; i < cell.providers(); i++) {
                 User provider = userRepository.save(User.builder()
                         .email("bench-provider-" + uniqueId() + "@test.com")
                         .passwordHash("hash")
                         .role(User.UserRole.PROVIDER)
                         .build());
                 providerAccountRepository.save(ProviderAccount.builder().user(provider).build());
+                providers.add(provider);
+                providerIds.add(provider.getId());
+            }
+
+            // 이벤트를 제공자에게 라운드로빈 배정 — 이 분리가 이번 측정의 요점이다
+            List<Event> events = new ArrayList<>();
+            for (int i = 0; i < cell.events(); i++) {
                 events.add(eventRepository.save(Event.builder()
-                        .provider(provider)
+                        .provider(providers.get(i % cell.providers()))
                         .title("정산 처리량 측정 이벤트")
                         .venue("벤치마크홀")
                         .eventAt(LocalDateTime.now().plusDays(1))
                         .build()));
-                providerIds.add(provider.getId());
             }
 
             List<Long> bookerIds = new ArrayList<>();
@@ -270,7 +300,7 @@ class SettlementThroughputBenchmark extends MySQLIntegrationTest {
                 bookerAccountRepository.save(account);
 
                 Seat seat = seatRepository.save(Seat.builder()
-                        .event(events.get(i % providerCount))
+                        .event(events.get(i % cell.events()))
                         .label("B-" + uniqueId())
                         .price(PRICE)
                         .status(Seat.SeatStatus.HELD)
