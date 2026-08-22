@@ -160,7 +160,7 @@ public class PaymentOrder {
         return amount - canceledAmount;
     }
 
-    /** 취소 기한(승인 시각 + {@code days}) 이내인가. 전자상거래법 청약철회 기간 반영 (ADR-019). */
+    /** 취소 기한(승인 시각 + {@code days}) 이내인가. 기한은 카드 취소의 실질 상한 (ADR-019 1-1). */
     public boolean isWithinCancelPeriod(LocalDateTime now, int days) {
         return approvedAt != null && !now.isAfter(approvedAt.plusDays(days));
     }
