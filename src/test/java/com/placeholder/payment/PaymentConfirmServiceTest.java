@@ -19,6 +19,7 @@ import com.placeholder.domain.user.entity.User;
 import com.placeholder.domain.user.repository.UserRepository;
 import com.placeholder.global.exception.custom.PaymentAmountMismatchException;
 import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
+import com.placeholder.global.exception.custom.PaymentResultUnknownException;
 import com.placeholder.support.MySQLIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -140,6 +141,56 @@ class PaymentConfirmServiceTest extends MySQLIntegrationTest {
 
         assertThat(balanceOf(bookerId)).isZero();
         assertThat(chargeCount(bookerId)).isZero();
+        assertThat(paymentOrderRepository.findByOrderId(orderId).orElseThrow().getStatus())
+                .isEqualTo(PaymentStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("결과 모름: 실패로 단정하지 않는다 → 주문 IN_PROGRESS 유지, 응답도 IN_PROGRESS, 적립 없음")
+    void confirm_resultUnknown_staysInProgress() {
+        Long bookerId = persistBooker(0);
+        String orderId = orderService.createOrder(bookerId, 10_000).getOrderId();
+        when(tossClient.confirm(any(), any(), anyInt()))
+                .thenThrow(new PaymentResultUnknownException("Request timed out"));
+
+        PaymentConfirmResponse res = confirmService.confirm(orderId, "pk_1", 10_000, bookerId);
+
+        assertThat(res.getStatus()).isEqualTo("IN_PROGRESS");
+        assertThat(res.getChargedAmount()).isZero();
+        assertThat(balanceOf(bookerId)).isZero();
+        assertThat(paymentOrderRepository.findByOrderId(orderId).orElseThrow().getStatus())
+                .isEqualTo(PaymentStatus.IN_PROGRESS);
+    }
+
+    @Test
+    @DisplayName("결과 대기 중 재요청: 토스를 다시 부르지 않고 IN_PROGRESS로 답한다")
+    void confirm_whileInProgress_doesNotCallTossAgain() {
+        Long bookerId = persistBooker(0);
+        String orderId = orderService.createOrder(bookerId, 10_000).getOrderId();
+        when(tossClient.confirm(any(), any(), anyInt()))
+                .thenThrow(new PaymentResultUnknownException("Request timed out"));
+        confirmService.confirm(orderId, "pk_1", 10_000, bookerId);
+
+        PaymentConfirmResponse retry = confirmService.confirm(orderId, "pk_1", 10_000, bookerId);
+
+        assertThat(retry.getStatus()).isEqualTo("IN_PROGRESS");
+        verify(tossClient, times(1)).confirm(any(), any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("이미 FAILED인 주문: 거부, 토스 호출 없음 (종결 주문은 새 주문으로 다시 결제)")
+    void confirm_failedOrder_rejectedWithoutCallingToss() {
+        Long bookerId = persistBooker(0);
+        String orderId = orderService.createOrder(bookerId, 10_000).getOrderId();
+        when(tossClient.confirm(any(), any(), anyInt()))
+                .thenThrow(new PaymentConfirmFailedException("카드사 거절"));
+        assertThatThrownBy(() -> confirmService.confirm(orderId, "pk_1", 10_000, bookerId))
+                .isInstanceOf(PaymentConfirmFailedException.class);
+
+        assertThatThrownBy(() -> confirmService.confirm(orderId, "pk_1", 10_000, bookerId))
+                .isInstanceOf(PaymentConfirmFailedException.class);
+
+        verify(tossClient, times(1)).confirm(any(), any(), anyInt());
         assertThat(paymentOrderRepository.findByOrderId(orderId).orElseThrow().getStatus())
                 .isEqualTo(PaymentStatus.FAILED);
     }

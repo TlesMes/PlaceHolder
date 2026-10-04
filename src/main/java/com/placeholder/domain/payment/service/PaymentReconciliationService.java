@@ -19,8 +19,8 @@ import java.util.Optional;
  * 결제 대사 — 동기 승인(confirm)과 웹훅이 <b>둘 다</b> 실패한 결제를 찾아 바로잡는 세 번째 층 (ADR-018).
  *
  * <p>이중화만으로는 구멍이 남는다: 토스는 승인을 마쳤는데 confirm 응답 전 서버가 죽고 웹훅마저
- * 유실되면, 주문은 READY로 남고 사용자는 돈만 낸 상태가 된다 — 그리고 시스템은 그 사실을 영원히
- * 모른다. 대사는 주기적으로 토스에 되물어 이 불일치를 스스로 발견해 보정한다.
+ * 유실되면, 주문은 READY(또는 응답을 못 받았다면 IN_PROGRESS)로 남고 사용자는 돈만 낸 상태가
+ * 된다 — 그리고 시스템은 그 사실을 영원히 모른다. 대사는 주기적으로 토스에 되물어 이 불일치를 스스로 발견해 보정한다.
  *
  * <p><b>orderId 조회가 축이다.</b> 누락 주문은 paymentKey가 null이라 기존 조회로는 접근할 수 없고,
  * 우리가 발급해 항상 보유한 orderId로 물어야 한다({@link TossPaymentClient#findByOrderId}).
@@ -42,11 +42,18 @@ public class PaymentReconciliationService {
     private final PaymentSettlementService settlementService;
     private final TossPaymentClient tossClient;
 
+    /**
+     * 결과가 확정되지 않은 주문 전부. {@code IN_PROGRESS}는 "승인을 요청했는데 응답을 못 받은" 주문이라
+     * 대사가 가장 먼저 챙겨야 할 대상이다 — 이걸 빼면 그 결제는 아무도 확정하지 않는다 (ADR-022).
+     */
+    private static final List<PaymentStatus> CANDIDATE_STATUSES =
+            List.of(PaymentStatus.READY, PaymentStatus.IN_PROGRESS);
+
     @Value("${payment.reconciliation.batch-size:100}")
     private int batchSize;
 
     /**
-     * 지정 구간에 생성된 READY 주문을 토스와 대조해 보정한다.
+     * 지정 구간에 생성된 결과 미확정(READY·IN_PROGRESS) 주문을 토스와 대조해 보정한다.
      *
      * @param from        스캔 시작 (이 시각 이후 생성분)
      * @param to          스캔 끝 (이 시각 이전 생성분) — 진행 중인 최신 주문을 제외하는 유예선
@@ -124,8 +131,8 @@ public class PaymentReconciliationService {
      * 뒤이은 토스 호출이 트랜잭션 밖에 놓인다.
      */
     private List<PaymentOrder> findCandidates(LocalDateTime from, LocalDateTime to) {
-        return paymentOrderRepository.findByStatusAndCreatedAtBetweenOrderByCreatedAtAsc(
-                PaymentStatus.READY, from, to, PageRequest.of(0, batchSize));
+        return paymentOrderRepository.findByStatusInAndCreatedAtBetweenOrderByCreatedAtAsc(
+                CANDIDATE_STATUSES, from, to, PageRequest.of(0, batchSize));
     }
 
     /** 토스 측에서 이미 종결된 실패 상태. 되돌아올 일이 없으므로 FAILED로 확정한다. */

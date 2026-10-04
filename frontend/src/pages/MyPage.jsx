@@ -35,6 +35,7 @@ const TYPE_META = {
 // 주문 상태 표현
 const PAYMENT_STATUS_META = {
   READY: { label: '결제 대기', badge: 'bg-surface-muted text-fg-muted' },
+  IN_PROGRESS: { label: '결제 확인 중', badge: 'bg-warning-soft text-warning-soft-fg' },
   DONE: { label: '결제 완료', badge: 'bg-success-soft text-success-soft-fg' },
   FAILED: { label: '결제 실패', badge: 'bg-danger-soft text-danger-soft-fg' },
   EXPIRED: { label: '만료됨', badge: 'bg-surface-muted text-fg-muted' },

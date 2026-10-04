@@ -12,8 +12,9 @@ import java.time.LocalDateTime;
  * <p>주문 생성 시점에 서버가 {@code amount}를 확정 저장한다. 이후 confirm/웹훅이 들고 오는 금액은
  * 이 저장값과 대조해 위변조를 막는다(클라이언트가 보낸 금액을 신뢰하지 않는다).
  *
- * <p>상태는 {@code READY → DONE} (승인·적립 완료) 또는 {@code READY → FAILED} (승인 실패)로 전이하고,
- * 확정된 주문은 취소로 {@code DONE → PARTIAL_CANCELED → CANCELED}까지 이어질 수 있다 (ADR-019).
+ * <p>상태는 {@code READY → IN_PROGRESS → DONE} (승인·적립 완료) 또는 {@code → FAILED} (승인 실패)로
+ * 전이하고, 확정된 주문은 취소로 {@code DONE → PARTIAL_CANCELED → CANCELED}까지 이어질 수 있다 (ADR-019).
+ * {@code IN_PROGRESS}는 "토스에 승인을 요청했고 결과는 아직 모른다"이다 (ADR-022).
  * 그 외 재전이는 거부한다. 상태 변경은 도메인 메서드로만 수행한다 (setter 금지). confirm(동기)과
  * webhook(보조)이 같은 orderId로 동시에 도착해도, 비관적 락({@code findByOrderIdForUpdate}) 보유자만
  * READY→DONE 전이를 하므로 포인트는 정확히 1회 적립된다.
@@ -96,6 +97,30 @@ public class PaymentOrder {
         return status == PaymentStatus.READY;
     }
 
+    /** 아직 승인 결과가 확정되지 않은 주문 — 승인 전({@code READY}) 또는 결과 대기({@code IN_PROGRESS}). */
+    public boolean isPending() {
+        return status == PaymentStatus.READY || status == PaymentStatus.IN_PROGRESS;
+    }
+
+    public boolean isInProgress() {
+        return status == PaymentStatus.IN_PROGRESS;
+    }
+
+    /**
+     * 승인 요청 시작 — <b>토스 호출 전에</b> 커밋한다 (ADR-022).
+     *
+     * <p>이 전이가 없으면 "아직 요청 안 함"과 "요청했는데 결과 모름"이 둘 다 READY라 구분되지 않는다.
+     * 그 결과 ① 첫 요청이 진행 중일 때 들어온 두 번째 요청(새로고침)이 READY를 보고 토스를 또 호출하고,
+     * ② 응답을 못 받은 결제를 FAILED로 뭉갤 수밖에 없었다(토스는 승인했는데 포인트는 없는 상태).
+     * 비관적 락을 쥔 채로 READY에서만 전이하므로 동시 요청 중 하나만 토스를 호출한다.
+     */
+    public void markInProgress() {
+        if (status != PaymentStatus.READY) {
+            throw new IllegalStateException("READY 상태의 주문만 승인을 시작할 수 있습니다: status=" + status);
+        }
+        this.status = PaymentStatus.IN_PROGRESS;
+    }
+
     /**
      * 이미 적립이 완료된 이력이 있는가 — 멱등 판정용.
      *
@@ -111,12 +136,15 @@ public class PaymentOrder {
     }
 
     /**
-     * 승인·적립 완료 처리. READY 상태에서만 호출 가능(종결 상태 재전이 거부).
+     * 승인·적립 완료 처리. 결과 미확정({@link #isPending()}) 상태에서만 호출 가능(종결 상태 재전이 거부).
+     *
+     * <p>{@code READY}에서도 허용하는 이유: 승인 요청이 토스엔 도달했지만 우리가 {@code IN_PROGRESS}를
+     * 기록하기 전 경로(웹훅·대사가 먼저 도착)도 있다. 토스가 DONE이라고 확인해 준 이상 적립이 맞다.
      * 비관적 락 보유 상태에서만 호출해야 한다. 상태 변경은 이 도메인 메서드로만 수행한다(setter 금지).
      */
     public void markDone(String paymentKey) {
-        if (status != PaymentStatus.READY) {
-            throw new IllegalStateException("READY 상태의 주문만 확정할 수 있습니다: status=" + status);
+        if (!isPending()) {
+            throw new IllegalStateException("결과 미확정 주문만 확정할 수 있습니다: status=" + status);
         }
         this.status = PaymentStatus.DONE;
         this.paymentKey = paymentKey;
@@ -124,11 +152,15 @@ public class PaymentOrder {
     }
 
     /**
-     * 승인 실패 처리. READY 상태에서만 전이(이미 확정된 주문은 실패로 뒤집지 않는다).
+     * 승인 실패 처리. 결과 미확정 상태에서만 전이(이미 확정된 주문은 실패로 뒤집지 않는다).
+     *
+     * <p>⚠️ <b>"토스가 거절했다"가 확인됐을 때만</b> 호출한다. 타임아웃·전송 실패처럼 결과를 모르는
+     * 경우에 부르면 토스가 실제로 승인한 결제가 실패로 굳는다 — 그런 주문은 {@code IN_PROGRESS}로
+     * 두고 웹훅·대사가 토스에 물어 결정한다 (ADR-022).
      */
     public void markFailed() {
-        if (status != PaymentStatus.READY) {
-            throw new IllegalStateException("READY 상태의 주문만 실패 처리할 수 있습니다: status=" + status);
+        if (!isPending()) {
+            throw new IllegalStateException("결과 미확정 주문만 실패 처리할 수 있습니다: status=" + status);
         }
         this.status = PaymentStatus.FAILED;
     }
@@ -142,10 +174,13 @@ public class PaymentOrder {
      * <p>⚠️ 성급한 만료는 사고를 만든다 — 주문 생성 직후엔 토스도 아직 그 orderId를 모르므로(404),
      * 이때 만료시키면 곧이어 결제를 마친 사용자의 confirm이 거부된다(돈은 나갔는데 포인트 없음).
      * 그래서 이 전이는 충분히 오래된 주문만 다루는 새벽 배치에만 허용한다.
+     *
+     * <p>{@code IN_PROGRESS}도 받는다 — 하루가 지나도 토스에 기록이 없다면 승인 요청이 도달하지
+     * 않은 것이고, 돈도 움직이지 않았다.
      */
     public void markExpired() {
-        if (status != PaymentStatus.READY) {
-            throw new IllegalStateException("READY 상태의 주문만 만료 처리할 수 있습니다: status=" + status);
+        if (!isPending()) {
+            throw new IllegalStateException("결과 미확정 주문만 만료 처리할 수 있습니다: status=" + status);
         }
         this.status = PaymentStatus.EXPIRED;
     }
@@ -231,7 +266,10 @@ public class PaymentOrder {
     }
 
     public enum PaymentStatus {
-        READY, DONE, FAILED, EXPIRED, PARTIAL_CANCELED, CANCELED
+        READY,
+        /** 토스에 승인을 요청했고 결과는 아직 모른다 (ADR-022). 웹훅·대사가 토스에 물어 확정한다. */
+        IN_PROGRESS,
+        DONE, FAILED, EXPIRED, PARTIAL_CANCELED, CANCELED
     }
 
     /** 환불 진행 상태 (파생값 — 저장하지 않는다). */

@@ -9,6 +9,8 @@ import com.placeholder.domain.payment.entity.PaymentOrder.PaymentStatus;
 import com.placeholder.domain.payment.repository.PaymentOrderRepository;
 import com.placeholder.domain.payment.service.PaymentReconciliationService;
 import com.placeholder.domain.payment.service.PaymentReconciliationService.ReconcileResult;
+import com.placeholder.domain.payment.service.PaymentSettlementService;
+import com.placeholder.domain.payment.service.PaymentSettlementService.ConfirmStart;
 import com.placeholder.domain.point.entity.PointTransaction.TransactionType;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
 import com.placeholder.domain.user.entity.User;
@@ -48,6 +50,7 @@ import static org.mockito.Mockito.when;
 class PaymentReconciliationServiceTest extends MySQLIntegrationTest {
 
     @Autowired PaymentReconciliationService reconciliationService;
+    @Autowired PaymentSettlementService settlementService;
     @Autowired PaymentOrderRepository paymentOrderRepository;
     @Autowired BookerAccountRepository bookerAccountRepository;
     @Autowired PointTransactionRepository pointTransactionRepository;
@@ -174,6 +177,49 @@ class PaymentReconciliationServiceTest extends MySQLIntegrationTest {
         assertThat(statusOf(orderId)).isEqualTo(PaymentStatus.DONE);
     }
 
+    // --- IN_PROGRESS: 승인을 요청했는데 응답을 못 받은 주문 (ADR-022) ---
+
+    @Test
+    @DisplayName("IN_PROGRESS + 토스 DONE → 적립 보정 (응답만 유실된 승인)")
+    void reconcile_inProgress_tossDone_credits() {
+        Long bookerId = persistBooker();
+        String orderId = persistInProgressOrder(bookerId, 10_000, hoursAgo(1));
+        stubToss(orderId, "DONE", 10_000);
+
+        ReconcileResult result = reconcileRecent();
+
+        assertThat(result.credited()).isEqualTo(1);
+        assertThat(balanceOf(bookerId)).isEqualTo(10_000);
+        assertThat(statusOf(orderId)).isEqualTo(PaymentStatus.DONE);
+    }
+
+    @Test
+    @DisplayName("IN_PROGRESS + 토스 EXPIRED → FAILED (승인 요청이 토스에 닿지 않아 토스가 만료시킴)")
+    void reconcile_inProgress_tossExpired_marksFailed() {
+        Long bookerId = persistBooker();
+        String orderId = persistInProgressOrder(bookerId, 10_000, hoursAgo(1));
+        stubToss(orderId, "EXPIRED", 10_000);
+
+        ReconcileResult result = reconcileRecent();
+
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(statusOf(orderId)).isEqualTo(PaymentStatus.FAILED);
+        assertThat(balanceOf(bookerId)).isZero();
+    }
+
+    @Test
+    @DisplayName("IN_PROGRESS + 404 → 보정 잡은 종결하지 않는다 (만료 권한 분리는 IN_PROGRESS에도 같다)")
+    void reconcile_inProgress_notFound_withoutExpirePermission_leavesInProgress() {
+        Long bookerId = persistBooker();
+        String orderId = persistInProgressOrder(bookerId, 10_000, hoursAgo(1));
+        when(tossClient.findByOrderId(orderId)).thenReturn(Optional.empty());
+
+        ReconcileResult result = reconcileRecent();
+
+        assertThat(result.skipped()).isEqualTo(1);
+        assertThat(statusOf(orderId)).isEqualTo(PaymentStatus.IN_PROGRESS);
+    }
+
     // --- 스캔 범위 ---
 
     @Test
@@ -259,6 +305,13 @@ class PaymentReconciliationServiceTest extends MySQLIntegrationTest {
                 .build());
         jdbcTemplate.update("update payment_orders set created_at = ? where order_id = ?",
                 createdAt, orderId);
+        return orderId;
+    }
+
+    /** 실제 승인 시작 경로({@code beginConfirm})로 READY → IN_PROGRESS 전이시킨다. */
+    private String persistInProgressOrder(Long userId, int amount, LocalDateTime createdAt) {
+        String orderId = persistReadyOrder(userId, amount, createdAt);
+        assertThat(settlementService.beginConfirm(orderId, amount, userId)).isEqualTo(ConfirmStart.PROCEED);
         return orderId;
     }
 

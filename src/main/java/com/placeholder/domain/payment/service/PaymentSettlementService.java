@@ -10,6 +10,7 @@ import com.placeholder.domain.point.entity.PointTransaction.TransactionType;
 import com.placeholder.domain.point.repository.PointTransactionRepository;
 import com.placeholder.global.exception.custom.PaymentAmountMismatchException;
 import com.placeholder.global.exception.custom.PaymentCancelNotAllowedException;
+import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
 import com.placeholder.global.exception.custom.PaymentOrderNotFoundException;
 import com.placeholder.global.exception.custom.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -37,12 +38,20 @@ public class PaymentSettlementService {
     private final PointTransactionRepository pointTransactionRepository;
 
     /**
-     * confirm 전 사전 검증 (외부 토스 호출 전에 수행). 락 없이 읽어 빠르게 fail-fast.
-     * @return 이미 확정된 주문이면 true (호출 측이 토스 승인 호출을 건너뛰고 바로 멱등 settle로 간다)
+     * <b>승인 시작 — 토스 호출 전 트랜잭션</b> (ADR-022).
+     *
+     * <p>주문 행을 잠그고 ① 본인 ② 금액 위변조 ③ 상태를 판정한 뒤, READY면 {@code IN_PROGRESS}로
+     * 전이해 <b>커밋한다</b>. 이 커밋이 다른 요청에게 "승인 요청이 이미 나갔다"를 알리는 시점이다.
+     * 락은 커밋과 함께 풀리므로 토스 응답을 기다리는 동안 락·커넥션을 쥐지 않는다(ADR-018 3번 유지).
+     *
+     * <p>예전에는 읽기 전용 검증이었다. 아무것도 기록하지 않아 "승인 요청 중"을 DB가 표현하지 못했고,
+     * 새로고침으로 온 두 번째 요청이 토스를 또 호출하거나, 응답을 못 받은 결제를 실패로 굳혔다.
+     *
+     * @return 호출 측이 이어서 할 일
      */
-    @Transactional(readOnly = true)
-    public boolean validateBeforeConfirm(String orderId, int requestAmount, Long userId) {
-        PaymentOrder order = paymentOrderRepository.findByOrderId(orderId)
+    @Transactional
+    public ConfirmStart beginConfirm(String orderId, int requestAmount, Long userId) {
+        PaymentOrder order = paymentOrderRepository.findByOrderIdForUpdate(orderId)
                 .orElseThrow(() -> new PaymentOrderNotFoundException("주문을 찾을 수 없습니다"));
 
         // 본인 주문만 확정 가능 (타인 주문은 존재를 숨기고 not found 처리)
@@ -54,25 +63,53 @@ public class PaymentSettlementService {
             throw new PaymentAmountMismatchException("결제 금액이 주문 금액과 일치하지 않습니다");
         }
         // 취소된 주문도 "이미 승인이 끝난" 주문이라 토스 승인을 다시 호출해선 안 된다 (ADR-019).
-        return order.isSettled();
+        if (order.isSettled()) {
+            return ConfirmStart.ALREADY_SETTLED;
+        }
+        // 다른 요청이 이미 토스에 승인을 요청했다 — 다시 부르지 않고 그 결과를 기다린다
+        if (order.isInProgress()) {
+            return ConfirmStart.IN_PROGRESS;
+        }
+        if (!order.isReady()) {
+            throw new PaymentConfirmFailedException(
+                    "승인할 수 없는 주문 상태입니다: status=" + order.getStatus());
+        }
+        order.markInProgress();
+        return ConfirmStart.PROCEED;
     }
 
     /**
-     * 승인 실패 확정. READY 상태에서만 FAILED로 전이(이미 DONE인 주문은 건드리지 않는다).
+     * 현재 주문 상태와 잔액 — 이번 요청이 적립하지 않았을 때(이미 처리됨·결과 대기)의 응답용.
+     * 상태를 다시 읽으므로, 그 사이 웹훅이 적립을 마쳤다면 DONE으로 답한다.
+     */
+    @Transactional(readOnly = true)
+    public SettleResult currentState(String orderId) {
+        PaymentOrder order = paymentOrderRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new PaymentOrderNotFoundException("주문을 찾을 수 없습니다"));
+        int balance = bookerAccountRepository.findByUserId(order.getUser().getId())
+                .map(BookerAccount::getBalance)
+                .orElse(0);
+        int charged = order.isSettled() ? order.getAmount() : 0;
+        return new SettleResult(charged, balance, false, order.getStatus());
+    }
+
+    /**
+     * 승인 실패 확정. 결과 미확정(READY·IN_PROGRESS)에서만 FAILED로 전이(이미 DONE인 주문은 건드리지 않는다).
+     * 토스가 거절했음이 <b>확인됐을 때만</b> 부른다 — 결과를 모를 때는 부르지 않는다 (ADR-022).
      */
     @Transactional
     public void markFailed(String orderId) {
         PaymentOrder order = paymentOrderRepository.findByOrderIdForUpdate(orderId)
                 .orElseThrow(() -> new PaymentOrderNotFoundException("주문을 찾을 수 없습니다"));
-        if (order.isReady()) {
+        if (order.isPending()) {
             order.markFailed();
         }
     }
 
     /**
-     * 고아 주문 만료 확정 (대사 새벽 배치 전용). READY 상태에서만 EXPIRED로 전이한다.
+     * 고아 주문 만료 확정 (대사 새벽 배치 전용). 결과 미확정 상태에서만 EXPIRED로 전이한다.
      *
-     * <p>{@link #markFailed}와 같은 패턴 — 비관적 락으로 잠그고 {@code isReady()} 가드를 두어,
+     * <p>{@link #markFailed}와 같은 패턴 — 비관적 락으로 잠그고 {@code isPending()} 가드를 두어,
      * 판정과 전이 사이에 confirm/웹훅이 먼저 적립을 끝냈다면 조용히 no-op이 된다(멱등).
      * 대사가 뒤늦게 정상 결제를 만료시키는 역전을 막는 지점이다.
      */
@@ -80,14 +117,15 @@ public class PaymentSettlementService {
     public void markExpired(String orderId) {
         PaymentOrder order = paymentOrderRepository.findByOrderIdForUpdate(orderId)
                 .orElseThrow(() -> new PaymentOrderNotFoundException("주문을 찾을 수 없습니다"));
-        if (order.isReady()) {
+        if (order.isPending()) {
             order.markExpired();
         }
     }
 
     /**
-     * 멱등 적립 — confirm·webhook 공통 수렴점. 주문 행을 비관적 락으로 잠그고,
-     * 이미 DONE이면 재적립 없이 현재 잔액만 반환한다. READY면 DONE 전이 + 충전 + CHARGE 기록.
+     * 멱등 적립 — confirm·webhook·대사 공통 수렴점. 주문 행을 비관적 락으로 잠그고,
+     * 이미 DONE이면 재적립 없이 현재 잔액만 반환한다. 결과 미확정(READY·IN_PROGRESS)이면
+     * DONE 전이 + 충전 + CHARGE 기록.
      */
     @Transactional
     public SettleResult settle(String orderId, String paymentKey) {
@@ -292,6 +330,16 @@ public class PaymentSettlementService {
      */
     public record SettleResult(int chargedAmount, int balance, boolean newlyCredited,
                                PaymentOrder.PaymentStatus status) {
+    }
+
+    /** {@link #beginConfirm}의 판정 — 호출 측이 토스 승인을 부를지 말지. */
+    public enum ConfirmStart {
+        /** READY → IN_PROGRESS 전이를 커밋했다. 이 요청이 토스를 호출한다. */
+        PROCEED,
+        /** 이미 적립(또는 취소)까지 끝난 주문. 토스를 부르지 않는다. */
+        ALREADY_SETTLED,
+        /** 다른 요청이 승인을 요청해 결과 대기 중. 토스를 부르지 않는다. */
+        IN_PROGRESS
     }
 
     /**
