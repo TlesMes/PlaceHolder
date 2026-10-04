@@ -14,6 +14,9 @@ import Spinner from '../components/Spinner';
  * 프론트는 값 전달만 한다 (ADR-018).
  *
  * 새로고침하면 confirm이 다시 호출되지만 서버가 orderId 기준 멱등 처리하므로 중복 적립되지 않는다.
+ *
+ * 응답 status가 IN_PROGRESS면 승인 결과를 아직 모르는 상태다(토스 응답 지연 등). 실패가 아니므로
+ * 실패 화면을 띄우지 않고, 적립 완료라고 말하지도 않는다 — 서버가 토스에 확인해 확정한다 (ADR-022).
  */
 export default function PaymentSuccessPage() {
   const [params] = useSearchParams();
@@ -21,7 +24,7 @@ export default function PaymentSuccessPage() {
   const orderId = params.get('orderId');
   const amount = Number(params.get('amount'));
 
-  const [state, setState] = useState('loading'); // loading | done | error
+  const [state, setState] = useState('loading'); // loading | done | pending | error
   const [result, setResult] = useState(null);
   const [message, setMessage] = useState('');
   const requested = useRef(false);
@@ -39,7 +42,7 @@ export default function PaymentSuccessPage() {
     confirmPayment({ orderId, paymentKey, amount })
       .then(({ data }) => {
         setResult(data);
-        setState('done');
+        setState(data.status === 'IN_PROGRESS' ? 'pending' : 'done');
       })
       .catch((err) => {
         setMessage(toMessage(err, '결제 승인에 실패했습니다.'));
@@ -76,6 +79,28 @@ export default function PaymentSuccessPage() {
               className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"
             >
               마이페이지
+            </Link>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (state === 'pending') {
+    return (
+      <Layout>
+        <div className="mx-auto max-w-md rounded-2xl border border-border bg-surface p-6 text-center shadow-sm">
+          <h1 className="mb-2 text-xl font-bold text-fg">결제 확인 중</h1>
+          <p className="rounded-lg bg-warning-soft px-4 py-3 text-sm text-warning-soft-fg">
+            결제사 응답이 늦어 승인 결과를 확인하고 있습니다. 결제가 완료됐다면 잠시 후 포인트가
+            자동으로 적립됩니다. 다시 결제하지 마세요.
+          </p>
+          <div className="mt-5 flex justify-center gap-2">
+            <Link
+              to="/me"
+              className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover"
+            >
+              결제 내역 확인
             </Link>
           </div>
         </div>
