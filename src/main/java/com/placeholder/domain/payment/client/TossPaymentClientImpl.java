@@ -2,6 +2,7 @@ package com.placeholder.domain.payment.client;
 
 import com.placeholder.global.exception.custom.PaymentCancelFailedException;
 import com.placeholder.global.exception.custom.PaymentConfirmFailedException;
+import com.placeholder.global.exception.custom.PaymentResultUnknownException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
@@ -10,6 +11,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.nio.charset.StandardCharsets;
@@ -32,6 +34,9 @@ import java.util.Optional;
  * {@code CompletableFuture.cancel()}로 중단하는데, 이때 나오는 {@code CancellationException}은
  * {@code RestClientException}이 아니어서 그대로 빠져나간다. 그러면 호출 측(confirm)의 실패 처리가
  * 건너뛰어져 승인 실패 주문이 READY로 남고 사용자에겐 500이 나간다.
+ *
+ * <p>승인({@link #confirm})은 여기서 한 번 더 나눈다 — 번역된 도메인 예외가 "거절"인지 "결과 모름"인지에
+ * 따라 주문의 운명이 갈리기 때문이다 (ADR-022).
  */
 @Slf4j
 @Component
@@ -64,10 +69,21 @@ public class TossPaymentClientImpl implements TossPaymentClient {
                 .build();
     }
 
+    /**
+     * 결제 승인. 실패를 두 종류로 나눠 던진다 (ADR-022):
+     * <ul>
+     *   <li>{@link PaymentConfirmFailedException} — 토스가 4xx로 <b>명시적으로 거절</b>했다. 승인되지 않았다.</li>
+     *   <li>{@link PaymentResultUnknownException} — 그 외 전부(타임아웃, 전송 중 끊김, 5xx, 빈 본문).
+     *       요청이 토스에서 처리됐을 수 있으므로 실패로 단정하면 안 된다.</li>
+     * </ul>
+     * 판정을 "실패 쪽을 열거"가 아니라 "확실한 거절만 열거"로 둔 이유: 열거에서 빠진 예외가 생기면
+     * 결과 모름으로 떨어져야 안전하다. 반대로 두면 빠진 예외가 승인된 결제를 실패로 굳힌다.
+     */
     @Override
     public TossPaymentResult confirm(String paymentKey, String orderId, int amount) {
+        TossPaymentResponse res;
         try {
-            TossPaymentResponse res = restClient.post()
+            res = restClient.post()
                     .uri("/v1/payments/confirm")
                     .body(Map.of(
                             "paymentKey", paymentKey,
@@ -75,12 +91,19 @@ public class TossPaymentClientImpl implements TossPaymentClient {
                             "amount", amount))
                     .retrieve()
                     .body(TossPaymentResponse.class);
-            return toResult(res);
-        } catch (PaymentConfirmFailedException e) {
-            throw e;   // 이미 우리 예외(빈 본문 등) — 이중 포장하지 않는다
+        } catch (HttpClientErrorException e) {
+            // "이미 처리된 결제"는 거절이 아니라 승인이 끝났다는 뜻일 수 있다 — 결과는 토스에 다시 물어야 한다
+            if (e.getResponseBodyAsString().contains("ALREADY_PROCESSED_PAYMENT")) {
+                throw new PaymentResultUnknownException("토스: 이미 처리된 결제 — 결과 재확인 필요", e);
+            }
+            throw new PaymentConfirmFailedException("토스 결제 승인 거절: " + e.getMessage(), e);
         } catch (RuntimeException e) {
-            throw new PaymentConfirmFailedException("토스 결제 승인 호출 실패: " + e, e);
+            throw new PaymentResultUnknownException("토스 결제 승인 결과 모름: " + e, e);
         }
+        if (res == null) {
+            throw new PaymentResultUnknownException("토스 승인 응답 본문이 비어 있습니다");
+        }
+        return toResult(res);
     }
 
     @Override

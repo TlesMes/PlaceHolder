@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,14 +29,14 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, Long
     Optional<PaymentOrder> findByOrderIdForUpdate(@Param("orderId") String orderId);
 
     /**
-     * 대사 후보 조회 — 지정 구간에 생성된 특정 상태의 주문을 오래된 순으로 가져온다.
+     * 대사 후보 조회 — 지정 구간에 생성된, 지정 상태들의 주문을 오래된 순으로 가져온다.
      *
      * <p>락 없이 읽는다. 실제 상태 전이는 건별로 {@code findByOrderIdForUpdate}가 다시 잠그므로
      * 여기서 잠글 필요가 없고, 잠그면 외부 토스 호출 동안 락을 쥐게 되어 ADR-018 트랜잭션 경계
      * 원칙을 깬다. 오래된 순 정렬 + Pageable로 한 번에 처리할 건수를 제한한다.
      */
-    List<PaymentOrder> findByStatusAndCreatedAtBetweenOrderByCreatedAtAsc(
-            PaymentStatus status, LocalDateTime from, LocalDateTime to, Pageable pageable);
+    List<PaymentOrder> findByStatusInAndCreatedAtBetweenOrderByCreatedAtAsc(
+            Collection<PaymentStatus> statuses, LocalDateTime from, LocalDateTime to, Pageable pageable);
 
     /**
      * 내 결제·환불 내역 — 최신순. 사용자당 주문 건수가 적어 cursor 페이징 없이 상한만 둔다
