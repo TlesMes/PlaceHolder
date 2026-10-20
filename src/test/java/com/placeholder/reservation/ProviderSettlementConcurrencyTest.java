@@ -55,11 +55,16 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 구조적으로 불가능해졌다.</b> 이 테스트는 그 사실의 회귀 안전망으로 남는다.
  */
 @SuppressWarnings("null")
-@SpringBootTest
+@SpringBootTest(properties = {
+        // 기본 풀 10 < THREADS 32이면 풀이 먼저 병목이 된다 — 성능 측정 하네스와 같은 값
+        "spring.datasource.hikari.maximum-pool-size=48"
+})
 @ActiveProfiles("test")
 class ProviderSettlementConcurrencyTest extends MySQLIntegrationTest {
 
-    private static final int SEAT_COUNT = 10;
+    /** 성능 측정(SettlementThroughputBenchmark)과 같은 규모 — 정합성도 같은 부하에서 확인한다. */
+    private static final int SEAT_COUNT = 240;
+    private static final int THREADS = 32;
     private static final int PRICE = 5_000;
 
     @Autowired ReservationService reservationService;
@@ -80,8 +85,7 @@ class ProviderSettlementConcurrencyTest extends MySQLIntegrationTest {
         // given — 제공자 1명 + 좌석 10석, 각 좌석을 서로 다른 예약자가 홀드한 상태
         Fixture f = persistFixture();
 
-        ExecutorService executor = Executors.newFixedThreadPool(SEAT_COUNT);
-        CountDownLatch ready = new CountDownLatch(SEAT_COUNT);
+        ExecutorService executor = Executors.newFixedThreadPool(THREADS);
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(SEAT_COUNT);
         AtomicInteger succeeded = new AtomicInteger();
@@ -91,7 +95,6 @@ class ProviderSettlementConcurrencyTest extends MySQLIntegrationTest {
             Long seatId = f.seatIds.get(i);
             Long bookerId = f.bookerIds.get(i);
             executor.submit(() -> {
-                ready.countDown();
                 try {
                     start.await();
                     reservationService.confirmReservation(seatId, bookerId);
@@ -104,10 +107,12 @@ class ProviderSettlementConcurrencyTest extends MySQLIntegrationTest {
             });
         }
 
-        ready.await();
+        // 작업(240) > 스레드(32)라 전원 집결 래치는 쓸 수 없다 — 제출을 마치고 바로 출발시킨다
         start.countDown();
-        done.await(30, TimeUnit.SECONDS);
+        boolean finished = done.await(5, TimeUnit.MINUTES);
         executor.shutdownNow();
+
+        assertThat(finished).as("시간 안에 끝나야 한다").isTrue();
 
         // then — 전원 성공해야 한다 (경합 대상이 없으므로)
         assertThat(succeeded.get())
@@ -127,6 +132,17 @@ class ProviderSettlementConcurrencyTest extends MySQLIntegrationTest {
         assertThat(pointTransactionRepository.sumSettlementByProviderId(f.providerId))
                 .as("정산 잔액(파생) 이 SETTLE 이력 합과 일치해야 한다")
                 .isEqualTo((long) SEAT_COUNT * PRICE);
+
+        // 좌석·예약자 쪽도 온전해야 한다 — 전부 CONFIRMED, 예약자 잔액은 전부 소진
+        assertThat(seatRepository.findAllById(f.seatIds))
+                .as("모든 좌석이 CONFIRMED")
+                .hasSize(SEAT_COUNT)
+                .allMatch(seat -> seat.getStatus() == Seat.SeatStatus.CONFIRMED);
+        assertThat(bookerAccountRepository.findAll().stream()
+                .filter(a -> f.bookerIds.contains(a.getUser().getId()))
+                .mapToInt(BookerAccount::getBalance).sum())
+                .as("예약자 잔액은 전부 차감")
+                .isZero();
     }
 
     // --- 픽스처 ---
